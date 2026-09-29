@@ -1,0 +1,28 @@
+[package]
+name = "collider-core"
+description = "Engine for high-performance, resumable HLS stream capture"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+aes = "0.8"
+bytes = "1"
+cbc = { version = "0.1", features = ["alloc"] }
+chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
+dash-mpd = { version = "0.20.5", default-features = false }
+futures = "0.3"
+hex = "0.4"
+m3u8-rs = "6"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "http2"] }
+serde = { version = "1.0.229", features = ["derive"] }
+thiserror = "2"
+tokio = { version = "1", features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
+tokio-util = "0.7"
+tracing = "0.1"
+url = "2"
+
+[dev-dependencies]
+tempfile = "3"
