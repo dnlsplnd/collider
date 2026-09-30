@@ -16,6 +16,8 @@ pub struct Client {
 
 impl Client {
     /// `headers` are sent with every request (e.g. `Referer`, `Cookie`, `User-Agent`).
+    /// `timeout` is a stall timeout: a request fails when no data arrives for that long,
+    /// however long the whole transfer takes.
     pub fn new(headers: &[(String, String)], retries: u32, timeout: Duration) -> Result<Self> {
         let mut map = HeaderMap::new();
         for (k, v) in headers {
@@ -28,7 +30,7 @@ impl Client {
         let inner = reqwest::Client::builder()
             .user_agent(concat!("collider/", env!("CARGO_PKG_VERSION")))
             .default_headers(map)
-            .timeout(timeout)
+            .read_timeout(timeout)
             .connect_timeout(Duration::from_secs(15))
             .pool_max_idle_per_host(64)
             .build()?;
@@ -37,10 +39,20 @@ impl Client {
 
     /// GET a resource, optionally a byte range given as `(offset, length)`.
     pub async fn get_bytes(&self, url: &Url, range: Option<(u64, u64)>) -> Result<Bytes> {
+        Ok(self.get_bytes_with_url(url, range).await?.1)
+    }
+
+    /// Like [`Client::get_bytes`], but also returns the final URL after redirects.
+    /// Relative references in a manifest resolve against that URL (RFC 3986 §5.1.3).
+    pub async fn get_bytes_with_url(
+        &self,
+        url: &Url,
+        range: Option<(u64, u64)>,
+    ) -> Result<(Url, Bytes)> {
         let mut attempt = 0;
         loop {
             match self.try_get(url, range).await {
-                Ok(b) => return Ok(b),
+                Ok(r) => return Ok(r),
                 Err(e) if attempt < self.retries && is_retryable(&e) => {
                     let delay = backoff(attempt);
                     tracing::warn!(%url, attempt = attempt + 1, ?delay, error = %e, "retrying");
@@ -52,7 +64,7 @@ impl Client {
         }
     }
 
-    async fn try_get(&self, url: &Url, range: Option<(u64, u64)>) -> Result<Bytes> {
+    async fn try_get(&self, url: &Url, range: Option<(u64, u64)>) -> Result<(Url, Bytes)> {
         let mut req = self.inner.get(url.clone());
         if let Some((offset, len)) = range.filter(|(_, len)| *len > 0) {
             req = req.header(RANGE, format!("bytes={}-{}", offset, offset + len - 1));
@@ -65,8 +77,9 @@ impl Client {
                 url: url.to_string(),
             });
         }
+        let final_url = resp.url().clone();
         let body = resp.bytes().await?;
-        match range {
+        let body = match range {
             // Some servers ignore Range and answer 200 with the whole resource: slice locally.
             Some((offset, len)) if status != reqwest::StatusCode::PARTIAL_CONTENT && len > 0 => {
                 let (start, end) = (offset as usize, (offset + len) as usize);
@@ -80,10 +93,11 @@ impl Client {
                     });
                 }
                 tracing::debug!(%url, "server ignored Range header; slicing response");
-                Ok(body.slice(start..end))
+                body.slice(start..end)
             }
-            _ => Ok(body),
-        }
+            _ => body,
+        };
+        Ok((final_url, body))
     }
 }
 

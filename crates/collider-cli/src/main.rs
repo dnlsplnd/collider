@@ -38,7 +38,7 @@ struct NetArgs {
     /// Retries per request on network errors, 429 and 5xx
     #[arg(long, default_value_t = 5)]
     retries: u32,
-    /// Per-request timeout in seconds
+    /// Give up on a request after this many seconds without receiving data
     #[arg(long, default_value_t = 30)]
     timeout: u64,
 }
@@ -59,6 +59,9 @@ struct GetArgs {
     /// Output file; the container is chosen from the extension
     #[arg(short, long, default_value = "output.mp4")]
     output: PathBuf,
+    /// Overwrite the output file if it already exists
+    #[arg(short, long)]
+    force: bool,
     /// Parallel segment downloads per track
     #[arg(short = 'j', long, default_value_t = 8)]
     concurrency: usize,
@@ -228,6 +231,7 @@ async fn get(args: GetArgs) -> Result<()> {
         keep_parts: args.keep_parts,
         remux: !args.no_remux,
         wait: args.wait.map(|s| Duration::from_secs(s.max(1))),
+        overwrite: args.force,
     };
 
     let cancel = CancellationToken::new();
@@ -296,18 +300,24 @@ impl Ui {
         }
     }
 
+    /// Print a message line above the bars. `MultiProgress::println` drops it when stderr
+    /// is not a terminal, and unattended recordings need these lines most.
+    fn line(&self, msg: String) {
+        if self.multi.is_hidden() {
+            eprintln!("{msg}");
+        } else {
+            self.multi.println(msg).ok();
+        }
+    }
+
     fn handle(&self, e: Event) {
         let mut tracks = self.tracks.lock().unwrap();
         match e {
-            Event::Status(s) => {
-                self.multi.println(format!("» {s}")).ok();
-            }
-            Event::Detected { protocol } => {
-                self.multi.println(format!("» {protocol} stream")).ok();
-            }
-            Event::Gaps { track, missing } => {
-                self.multi.println(format!("! {track}: {missing} segment(s) could not be fetched; the recording has gaps")).ok();
-            }
+            Event::Status(s) => self.line(format!("» {s}")),
+            Event::Detected { protocol } => self.line(format!("» {protocol} stream")),
+            Event::Gaps { track, missing } => self.line(format!(
+                "! {track}: {missing} segment(s) could not be fetched; the recording has gaps"
+            )),
             Event::TrackStarted { track, live, .. } => {
                 let bar = self.multi.add(if live {
                     ProgressBar::no_length()

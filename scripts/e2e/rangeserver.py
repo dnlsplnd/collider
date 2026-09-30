@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Minimal static file server that honours HTTP Range requests (206), for e2e tests.
 
+Requests under /redir/ answer 302 with the same path minus that prefix, like a CDN edge.
+
 Usage: rangeserver.py PORT [DIRECTORY]
 """
 import os
@@ -14,6 +16,12 @@ class RangeHandler(SimpleHTTPRequestHandler):
         pass
 
     def do_GET(self):
+        if self.path.startswith("/redir/"):
+            self.send_response(302)
+            self.send_header("Location", self.path[len("/redir"):])
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         path = self.translate_path(self.path)
         rng = self.headers.get("Range")
         if not rng or not os.path.isfile(path):

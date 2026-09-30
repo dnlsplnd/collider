@@ -20,6 +20,9 @@ pub enum Error {
     NoVariant(String),
     #[error("stream is not live yet: {0}")]
     NotLive(String),
+    /// The output or work directory already holds something this run must not overwrite.
+    #[error("{0}")]
+    Conflict(String),
     #[error("ffmpeg failed: {0}")]
     Mux(String),
     #[error("cancelled; completed segments were kept, rerun the same command to resume")]

@@ -29,6 +29,22 @@ impl Variant {
     pub fn height(&self) -> u64 {
         self.resolution.map(|(_, h)| h).unwrap_or(0)
     }
+
+    /// An audio-only variant (e.g. `CODECS="mp4a.40.2"` without `RESOLUTION`), as Apple
+    /// recommends offering for poor connections.
+    pub fn is_audio_only(&self) -> bool {
+        const VIDEO: [&str; 14] = [
+            "avc1", "avc3", "hvc1", "hev1", "av01", "vp08", "vp09", "vp8", "vp9", "dvh1", "dvhe",
+            "dva1", "dvav", "mp4v",
+        ];
+        self.resolution.is_none()
+            && self.codecs.as_deref().is_some_and(|c| {
+                !c.split(',').any(|codec| {
+                    let fourcc = codec.trim().split('.').next().unwrap_or_default();
+                    VIDEO.iter().any(|v| fourcc.eq_ignore_ascii_case(v))
+                })
+            })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -46,6 +62,8 @@ pub struct MediaInfo {
     pub target_duration: f64,
     /// `#EXT-X-ENDLIST` present: the playlist is complete (VOD or finished live event).
     pub ended: bool,
+    /// `#EXT-X-MEDIA-SEQUENCE` of the first segment, as served.
+    pub media_sequence: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -58,8 +76,17 @@ pub enum Manifest {
 }
 
 pub fn parse(base: &Url, bytes: &[u8]) -> Result<Manifest> {
-    match m3u8_rs::parse_playlist_res(bytes) {
+    let text = normalize(bytes);
+    match m3u8_rs::parse_playlist_res(&text) {
         Ok(Playlist::MasterPlaylist(m)) => {
+            // m3u8-rs demotes an EXT-X-STREAM-INF it cannot parse to an unknown tag and then
+            // assigns the following URI to the *previous* variant: the table would be shifted.
+            if let Some(t) = m.unknown_tags.iter().find(|t| t.tag == "X-STREAM-INF") {
+                return Err(Error::Parse(format!(
+                    "unparseable EXT-X-STREAM-INF: {}",
+                    t.rest.as_deref().unwrap_or_default()
+                )));
+            }
             let variants = m
                 .variants
                 .into_iter()
@@ -97,6 +124,97 @@ pub fn parse(base: &Url, bytes: &[u8]) -> Result<Manifest> {
     }
 }
 
+/// Rewrite the playlist text so m3u8-rs accepts common, harmless deviations instead of
+/// silently mis-parsing them:
+/// - a leading UTF-8 BOM and trailing whitespace on each line are dropped;
+/// - a fractional `EXT-X-TARGETDURATION` is rounded up (m3u8-rs reads only the integer part
+///   and turns the leftover `.0` into a phantom segment, shifting every sequence number);
+/// - `EXT-X-KEY` attribute lists are re-emitted with the quoting m3u8-rs requires
+///   (`METHOD`/`IV` unquoted, `URI`/`KEYFORMAT`/`KEYFORMATVERSIONS` quoted), and the valid
+///   `METHOD=NONE` without an IV gets a dummy IV that m3u8-rs 6 wrongly insists on.
+///   Otherwise such keys become unknown tags and lose their position in the playlist.
+fn normalize(bytes: &[u8]) -> Vec<u8> {
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return bytes.to_vec();
+    };
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let mut out = String::with_capacity(text.len() + 16);
+    for (i, line) in text.split('\n').enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        let line = line.trim_end();
+        if let Some(v) = line.strip_prefix("#EXT-X-TARGETDURATION:") {
+            if let Some(n) = v
+                .trim()
+                .parse::<f64>()
+                .ok()
+                .filter(|n| n.is_finite() && *n >= 0.0)
+            {
+                out.push_str(&format!("#EXT-X-TARGETDURATION:{}", n.ceil() as u64));
+                continue;
+            }
+        }
+        if let Some(attrs) = line.strip_prefix("#EXT-X-KEY:") {
+            if let Some(attrs) = normalize_key_attributes(attrs) {
+                out.push_str("#EXT-X-KEY:");
+                out.push_str(&attrs);
+                continue;
+            }
+        }
+        out.push_str(line);
+    }
+    out.into_bytes()
+}
+
+/// Parse an attribute list leniently (either quoting for any value) into `(name, value, quoted)`.
+fn attribute_list(s: &str) -> Option<Vec<(&str, &str, bool)>> {
+    let mut out = Vec::new();
+    let mut rest = s.trim();
+    while !rest.is_empty() {
+        let (name, after) = rest.split_once('=')?;
+        let after = after.trim_start();
+        let (value, quoted, tail) = match after.strip_prefix('"') {
+            Some(q) => {
+                let end = q.find('"')?;
+                (&q[..end], true, &q[end + 1..])
+            }
+            None => {
+                let end = after.find(',').unwrap_or(after.len());
+                (after[..end].trim(), false, &after[end..])
+            }
+        };
+        let tail = tail.trim_start();
+        rest = match tail.strip_prefix(',') {
+            Some(t) => t.trim_start(),
+            None if tail.is_empty() => tail,
+            None => return None,
+        };
+        out.push((name.trim(), value, quoted));
+    }
+    Some(out)
+}
+
+fn normalize_key_attributes(attrs: &str) -> Option<String> {
+    let list = attribute_list(attrs)?;
+    let mut out = Vec::with_capacity(list.len() + 1);
+    for (name, value, quoted) in &list {
+        out.push(match *name {
+            "METHOD" | "IV" => format!("{name}={}", value.trim()),
+            "URI" | "KEYFORMAT" | "KEYFORMATVERSIONS" => format!("{name}=\"{value}\""),
+            _ if *quoted => format!("{name}=\"{value}\""),
+            _ => format!("{name}={value}"),
+        });
+    }
+    let none = list
+        .iter()
+        .any(|(n, v, _)| *n == "METHOD" && v.trim() == "NONE");
+    if none && !list.iter().any(|(n, _, _)| *n == "IV") {
+        out.push("IV=0x0".into());
+    }
+    Some(out.join(","))
+}
+
 fn convert_media(base: &Url, pl: m3u8_rs::MediaPlaylist) -> Result<MediaInfo> {
     // EXT-X-KEY and EXT-X-MAP apply to every following segment until replaced;
     // m3u8-rs only attaches them to the segment they precede, so carry them forward.
@@ -107,24 +225,25 @@ fn convert_media(base: &Url, pl: m3u8_rs::MediaPlaylist) -> Result<MediaInfo> {
 
     for (i, s) in pl.segments.into_iter().enumerate() {
         let seq = pl.media_sequence + i as u64;
+        // Tags m3u8-rs could not parse (even after `normalize`) must not be ignored: a lost
+        // EXT-X-KEY would write ciphertext as output, a lost EXT-X-MAP an unplayable file.
+        if let Some(t) = s
+            .unknown_tags
+            .iter()
+            .find(|t| t.tag == "X-KEY" || t.tag == "X-MAP")
+        {
+            return Err(Error::Parse(format!(
+                "unparseable EXT-{}: {}",
+                t.tag,
+                t.rest.as_deref().unwrap_or_default()
+            )));
+        }
         if let Some(k) = s.key {
             key = if matches!(k.method, KeyMethod::None) {
                 None
             } else {
                 Some(k)
             };
-        }
-        // m3u8-rs 6 rejects the valid `METHOD=NONE` (no IV) and leaves it as an unknown tag.
-        if s.unknown_tags.iter().any(|t| {
-            t.tag == "X-KEY" && t.rest.as_deref().is_some_and(|r| r.contains("METHOD=NONE"))
-        }) {
-            key = None;
-        }
-        if let Some(m) = s.map {
-            init = Some(InitSection {
-                url: base.join(&m.uri)?,
-                byte_range: m.byte_range.map(|r| (r.offset.unwrap_or(0), r.length)),
-            });
         }
         let url = base.join(&s.uri)?;
         let byte_range = s.byte_range.map(|r| {
@@ -155,6 +274,21 @@ fn convert_media(base: &Url, pl: m3u8_rs::MediaPlaylist) -> Result<MediaInfo> {
                 }
             },
         };
+        if let Some(m) = s.map {
+            // RFC 8216 §4.3.2.5: an init section may be encrypted by the EXT-X-KEY in force,
+            // which must then carry an explicit IV. m3u8-rs does not record whether the KEY
+            // came before or after the MAP, so without an IV the init is taken as plaintext,
+            // and the downloader only decrypts it when it does not already look plaintext.
+            let init_key = match &key {
+                Some(k) if k.iv.is_some() => seg_key.clone(),
+                _ => None,
+            };
+            init = Some(InitSection {
+                url: base.join(&m.uri)?,
+                byte_range: m.byte_range.map(|r| (r.offset.unwrap_or(0), r.length)),
+                key: init_key,
+            });
+        }
         segments.push(Segment {
             seq,
             url,
@@ -162,6 +296,8 @@ fn convert_media(base: &Url, pl: m3u8_rs::MediaPlaylist) -> Result<MediaInfo> {
             byte_range,
             key: seg_key,
             init: init.clone(),
+            optional: false,
+            discontinuity: s.discontinuity,
         });
     }
 
@@ -169,6 +305,7 @@ fn convert_media(base: &Url, pl: m3u8_rs::MediaPlaylist) -> Result<MediaInfo> {
         segments,
         target_duration: pl.target_duration as f64,
         ended: pl.end_list,
+        media_sequence: pl.media_sequence,
     })
 }
 
@@ -214,13 +351,18 @@ impl FromStr for Quality {
 
 pub fn select_variant<'a>(variants: &'a [Variant], q: &Quality) -> Result<&'a Variant> {
     let rank = |v: &&Variant| (v.height(), v.bandwidth);
-    let pick = match q {
-        Quality::Best => variants.iter().max_by_key(rank),
-        Quality::Worst => variants.iter().min_by_key(rank),
-        Quality::MaxHeight(h) => variants
+    // Audio-only variants have no height and would otherwise rank lowest: never pick one
+    // as the video track when the master offers any video.
+    let has_video = variants.iter().any(|v| !v.is_audio_only());
+    let candidates = || {
+        variants
             .iter()
-            .filter(|v| v.height() <= *h)
-            .max_by_key(rank),
+            .filter(move |v| !has_video || !v.is_audio_only())
+    };
+    let pick = match q {
+        Quality::Best => candidates().max_by_key(rank),
+        Quality::Worst => candidates().min_by_key(rank),
+        Quality::MaxHeight(h) => candidates().filter(|v| v.height() <= *h).max_by_key(rank),
     };
     pick.ok_or_else(|| Error::NoVariant(format!("{q:?}")))
 }
@@ -301,19 +443,80 @@ pub struct HlsSource {
     client: Client,
     url: Url,
     first: Option<MediaInfo>,
+    epoch: Epoch,
+}
+
+/// Keeps `Segment::seq` unique across a media-sequence reset (encoder restart).
+///
+/// Sequence numbers must never decrease (RFC 8216 §6.2.1), but restarted encoders commonly
+/// start again at 0. Without renumbering, the downloader would take the new segments for
+/// ones it already has and silently drop them.
+#[derive(Default)]
+struct Epoch {
+    /// Added to every served sequence number.
+    offset: u64,
+    /// Media sequence of the last accepted playlist, as served.
+    last_media_sequence: Option<u64>,
+    /// Served sequence number -> URL path of the last accepted playlist.
+    last_window: std::collections::HashMap<u64, String>,
+    /// Highest (renumbered) `seq` returned so far.
+    highest: Option<u64>,
+}
+
+impl Epoch {
+    fn renumber(&mut self, url: &Url, media: &mut MediaInfo) {
+        let ms = media.media_sequence;
+        let mut stale = false;
+        if let Some(last) = self.last_media_sequence.filter(|last| ms < *last) {
+            // A lagging origin behind a load balancer serves an older copy of the *same*
+            // timeline: its segments match what we saw at the same sequence numbers.
+            stale = media
+                .segments
+                .iter()
+                .any(|s| self.last_window.get(&s.seq).map(String::as_str) == Some(s.url.path()));
+            if !stale {
+                let next = self.highest.map_or(0, |h| h + 1);
+                self.offset = next.saturating_sub(ms);
+                tracing::warn!(
+                    %url,
+                    "media sequence went backwards ({last} -> {ms}); treating it as a restarted stream"
+                );
+            }
+        }
+        if !stale {
+            self.last_media_sequence = Some(ms);
+            self.last_window = media
+                .segments
+                .iter()
+                .map(|s| (s.seq, s.url.path().to_string()))
+                .collect();
+        }
+        for s in &mut media.segments {
+            // Only the id changes: default AES IVs were already derived from the served number.
+            s.seq += self.offset;
+            self.highest = Some(self.highest.map_or(s.seq, |h| h.max(s.seq)));
+        }
+    }
 }
 
 impl HlsSource {
     pub fn new(client: Client, url: Url, first: Option<MediaInfo>) -> Self {
-        Self { client, url, first }
+        Self {
+            client,
+            url,
+            first,
+            epoch: Epoch::default(),
+        }
     }
 
     pub async fn refresh(&mut self) -> Result<Snapshot> {
-        let media = match self.first.take() {
+        let mut media = match self.first.take() {
             Some(m) => m,
             None => {
-                let body = self.client.get_bytes(&self.url, None).await?;
-                match parse(&self.url, &body)? {
+                // Re-request the original URL (redirecting edges may reissue tokens), but
+                // resolve relative URIs against where the playlist was actually served from.
+                let (base, body) = self.client.get_bytes_with_url(&self.url, None).await?;
+                match parse(&base, &body)? {
                     Manifest::Media(m) => m,
                     Manifest::Master { .. } => {
                         return Err(Error::Parse(format!(
@@ -324,6 +527,7 @@ impl HlsSource {
                 }
             }
         };
+        self.epoch.renumber(&self.url, &mut media);
         Ok(Snapshot {
             refresh_after: std::time::Duration::from_secs_f64(
                 media.target_duration.clamp(1.0, 30.0),
@@ -441,6 +645,213 @@ a.ts
             parse(&base(), pl.as_bytes()),
             Err(Error::Unsupported(_))
         ));
+    }
+
+    fn media(pl: &str) -> MediaInfo {
+        match parse(&base(), pl.as_bytes()).unwrap() {
+            Manifest::Media(m) => m,
+            Manifest::Master { .. } => panic!("expected media"),
+        }
+    }
+
+    #[test]
+    fn fractional_target_duration_does_not_add_a_phantom_segment() {
+        let m = media(
+            "#EXTM3U
+#EXT-X-TARGETDURATION:5.5
+#EXT-X-MEDIA-SEQUENCE:10
+#EXT-X-KEY:METHOD=AES-128,URI=\"k.bin\"
+#EXTINF:5.5,
+a.ts
+#EXTINF:5.5,
+b.ts
+",
+        );
+        assert_eq!(m.target_duration, 6.0);
+        assert_eq!(m.segments.len(), 2);
+        assert_eq!(m.segments[0].seq, 10);
+        assert_eq!(m.segments[0].url.path(), "/show/a.ts");
+        assert_eq!(m.segments[0].key.as_ref().unwrap().iv, iv_from_sequence(10));
+    }
+
+    #[test]
+    fn leniently_quoted_keys_are_honoured() {
+        for line in [
+            "#EXT-X-KEY:METHOD=AES-128,URI=\"k.bin\",IV=\"0x0000000000000000000000000000ABCD\"",
+            "#EXT-X-KEY:METHOD=\"AES-128\",URI=\"k.bin\",IV=0x0000000000000000000000000000ABCD",
+            "#EXT-X-KEY:METHOD=AES-128, URI=\"k.bin\", IV=0xABCD, KEYFORMAT=identity",
+        ] {
+            let m = media(&format!(
+                "#EXTM3U\n#EXT-X-TARGETDURATION:6\n{line}\n#EXTINF:6,\na.ts\n"
+            ));
+            let key = m.segments[0]
+                .key
+                .as_ref()
+                .unwrap_or_else(|| panic!("{line}"));
+            assert_eq!(key.url.path(), "/show/k.bin");
+            assert_eq!(key.iv[14..], [0xAB, 0xCD], "{line}");
+        }
+    }
+
+    #[test]
+    fn key_order_is_kept_for_method_none() {
+        let m = media(
+            "#EXTM3U
+#EXT-X-TARGETDURATION:6
+#EXT-X-KEY:METHOD=NONE
+#EXT-X-KEY:METHOD=AES-128,URI=\"k.bin\"
+#EXTINF:6,
+a.ts
+#EXTINF:6,
+b.ts
+#EXT-X-KEY:METHOD=AES-128,URI=\"k2.bin\"
+#EXT-X-KEY:METHOD=NONE
+#EXTINF:6,
+c.ts
+",
+        );
+        let keyed: Vec<bool> = m.segments.iter().map(|s| s.key.is_some()).collect();
+        assert_eq!(keyed, [true, true, false]);
+    }
+
+    #[test]
+    fn unparseable_key_is_an_error_not_plaintext() {
+        let pl = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-KEY:URI=\"k.bin\"\n#EXTINF:6,\na.ts\n";
+        assert!(matches!(
+            parse(&base(), pl.as_bytes()),
+            Err(Error::Parse(e)) if e.contains("EXT-X-KEY")
+        ));
+    }
+
+    #[test]
+    fn drm_with_unquoted_keyformat_is_still_rejected() {
+        let pl = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-KEY:METHOD=SAMPLE-AES,URI=\"skd://x\",KEYFORMAT=com.apple.streamingkeydelivery\n#EXTINF:6,\na.ts\n";
+        assert!(matches!(
+            parse(&base(), pl.as_bytes()),
+            Err(Error::Unsupported(_))
+        ));
+    }
+
+    #[test]
+    fn bom_crlf_and_trailing_whitespace() {
+        let pl = "\u{feff}#EXTM3U\r\n#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360 \r\n360.m3u8 \r\n#EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080 \r\n1080.m3u8\r\n#EXT-X-STREAM-INF:BANDWIDTH=2500000,RESOLUTION=1280x720\r\n720.m3u8\r\n";
+        let Manifest::Master { variants, .. } = parse(&base(), pl.as_bytes()).unwrap() else {
+            panic!("expected master");
+        };
+        let got: Vec<(u64, &str)> = variants
+            .iter()
+            .map(|v| (v.height(), v.url.path()))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                (360, "/show/360.m3u8"),
+                (1080, "/show/1080.m3u8"),
+                (720, "/show/720.m3u8")
+            ]
+        );
+    }
+
+    #[test]
+    fn unparseable_stream_inf_is_an_error_not_a_shifted_table() {
+        let pl = "#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360
+360.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=\"1920x1080\"
+1080.m3u8
+";
+        assert!(matches!(
+            parse(&base(), pl.as_bytes()),
+            Err(Error::Parse(e)) if e.contains("EXT-X-STREAM-INF")
+        ));
+    }
+
+    #[test]
+    fn audio_only_variants_are_not_picked_as_video() {
+        let pl = "#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=64000,CODECS=\"mp4a.40.2\"
+audio.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360,CODECS=\"avc1.4d401e,mp4a.40.2\"
+360.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=2500000,RESOLUTION=1280x720,CODECS=\"avc1.4d401f,mp4a.40.2\"
+720.m3u8
+";
+        let Manifest::Master { variants, .. } = parse(&base(), pl.as_bytes()).unwrap() else {
+            panic!("expected master");
+        };
+        assert!(variants[0].is_audio_only());
+        assert!(!variants[1].is_audio_only());
+        let pick = |q| select_variant(&variants, &q).map(|v| v.url.path().to_string());
+        assert_eq!(pick(Quality::Worst).unwrap(), "/show/360.m3u8");
+        assert_eq!(pick(Quality::Best).unwrap(), "/show/720.m3u8");
+        assert!(matches!(
+            pick(Quality::MaxHeight(240)),
+            Err(Error::NoVariant(_))
+        ));
+        // An audio-only master still works.
+        assert_eq!(
+            select_variant(&variants[..1], &Quality::Best)
+                .unwrap()
+                .url
+                .path(),
+            "/show/audio.m3u8"
+        );
+    }
+
+    #[test]
+    fn init_section_key_requires_an_explicit_iv() {
+        let m = media(
+            "#EXTM3U
+#EXT-X-TARGETDURATION:6
+#EXT-X-KEY:METHOD=AES-128,URI=\"k.bin\",IV=0x01
+#EXT-X-MAP:URI=\"init.mp4\"
+#EXTINF:6,
+a.m4s
+#EXT-X-KEY:METHOD=AES-128,URI=\"k.bin\"
+#EXT-X-MAP:URI=\"init2.mp4\"
+#EXTINF:6,
+b.m4s
+#EXT-X-KEY:METHOD=NONE
+#EXT-X-MAP:URI=\"init3.mp4\"
+#EXTINF:6,
+c.m4s
+",
+        );
+        let inits: Vec<_> = m.segments.iter().map(|s| s.init.clone().unwrap()).collect();
+        let k = inits[0].key.as_ref().unwrap();
+        assert_eq!((k.url.path(), k.iv[15]), ("/show/k.bin", 1));
+        assert!(inits[1].key.is_none());
+        assert!(inits[2].key.is_none());
+    }
+
+    #[test]
+    fn media_sequence_reset_starts_a_new_epoch() {
+        let pl = |ms: u64, names: &[&str]| {
+            let mut s = format!("#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:{ms}\n");
+            for n in names {
+                s.push_str(&format!("#EXTINF:2,\n{n}\n"));
+            }
+            media(&s)
+        };
+        let seqs = |m: &MediaInfo| m.segments.iter().map(|s| s.seq).collect::<Vec<_>>();
+        let mut e = Epoch::default();
+        let u = base();
+
+        let mut m = pl(50, &["s50.ts", "s51.ts", "s52.ts"]);
+        e.renumber(&u, &mut m);
+        assert_eq!(seqs(&m), [50, 51, 52]);
+        // A lagging origin serves an older copy of the same timeline: numbering is kept.
+        let mut m = pl(49, &["s49.ts", "s50.ts", "s51.ts"]);
+        e.renumber(&u, &mut m);
+        assert_eq!(seqs(&m), [49, 50, 51]);
+        // The encoder restarts at 0: the new segments continue after the highest id.
+        let mut m = pl(0, &["s0.ts", "s1.ts"]);
+        e.renumber(&u, &mut m);
+        assert_eq!(seqs(&m), [53, 54]);
+        // The new epoch then slides normally.
+        let mut m = pl(1, &["s1.ts", "s2.ts"]);
+        e.renumber(&u, &mut m);
+        assert_eq!(seqs(&m), [54, 55]);
     }
 
     #[test]

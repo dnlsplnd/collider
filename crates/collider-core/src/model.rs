@@ -41,6 +41,8 @@ pub struct Key {
 pub struct InitSection {
     pub url: Url,
     pub byte_range: Option<(u64, u64)>,
+    /// HLS only: the AES-128 key (with explicit IV) in force at the `EXT-X-MAP` tag.
+    pub key: Option<Key>,
 }
 
 impl InitSection {
@@ -53,9 +55,13 @@ impl InitSection {
     }
 }
 
+/// Segment seqs carry a period (timeline) ordinal above this bit; see [`Segment::period`].
+pub const PERIOD_SHIFT: u32 = 40;
+
 #[derive(Debug, Clone)]
 pub struct Segment {
-    /// Unique, monotonically increasing id within a track (used for resume and dedup).
+    /// Unique id within a track (used for resume and dedup). DASH packs the period ordinal
+    /// into the bits above [`PERIOD_SHIFT`]; HLS seqs stay below it.
     pub seq: u64,
     pub url: Url,
     pub duration: f64,
@@ -63,6 +69,18 @@ pub struct Segment {
     pub byte_range: Option<(u64, u64)>,
     pub key: Option<Key>,
     pub init: Option<InitSection>,
+    /// The manifest only implies this segment may exist (DASH: the truncated last segment
+    /// derived from a period duration), so a 404/410/416 means "end of period", not an error.
+    pub optional: bool,
+    /// HLS `EXT-X-DISCONTINUITY`: timestamps may restart at this segment.
+    pub discontinuity: bool,
+}
+
+impl Segment {
+    /// The DASH period this segment belongs to (always 0 for HLS).
+    pub fn period(&self) -> u64 {
+        self.seq >> PERIOD_SHIFT
+    }
 }
 
 /// One view of a track's playlist. Live tracks return new segments on later refreshes.
@@ -137,10 +155,12 @@ mod tests {
         let a = InitSection {
             url: Url::parse("https://x/init.mp4").unwrap(),
             byte_range: None,
+            key: None,
         };
         let b = InitSection {
             url: Url::parse("https://x/init.mp4").unwrap(),
             byte_range: Some((0, 10)),
+            key: None,
         };
         assert_eq!(a.file_name(), a.file_name());
         assert_ne!(a.file_name(), b.file_name());

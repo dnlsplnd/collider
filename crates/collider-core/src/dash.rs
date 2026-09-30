@@ -5,6 +5,7 @@
 //! Static and dynamic (live) presentations, multi-period, and BaseURL inheritance are handled.
 //! Presentations with `ContentProtection` (DRM) are rejected.
 
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -16,14 +17,20 @@ use crate::hls::Quality;
 use crate::http::Client;
 use crate::model::{
     parse_range, AudioInfo, InitSection, Protocol, Segment, Snapshot, StreamInfo, TrackKind,
-    VariantInfo,
+    VariantInfo, PERIOD_SHIFT,
 };
 use crate::sidx;
 
 /// A representation resolved within one period, with all inheritance applied.
 #[derive(Debug, Clone)]
 pub struct Rep {
+    /// Position of the period in this MPD document (changes when a live MPD drops periods).
     pub period_idx: usize,
+    /// Identity of the period across MPD refreshes: `Period@id`, else its start time.
+    pub period_key: String,
+    /// Namespace for this period's segment seqs. `parse` sets the positional index;
+    /// `DashSource` overrides it with an ordinal that stays stable across refreshes.
+    pub period_ord: u64,
     pub id: String,
     pub kind: TrackKind,
     pub bandwidth: u64,
@@ -52,6 +59,9 @@ pub enum Addressing {
         end_number: Option<u64>,
         duration: Option<f64>,
         timeline: Option<Vec<TimelineEntry>>,
+        /// Media time (in `timescale` ticks) at which the period starts.
+        presentation_time_offset: u64,
+        /// Seconds; `f64::INFINITY` for `availabilityTimeOffset="INF"`.
         availability_time_offset: f64,
     },
     List {
@@ -96,6 +106,7 @@ fn convert(url: &Url, mpd: &MPD) -> Result<Manifest> {
 
     let mut reps = Vec::new();
     let mut cursor = 0.0f64;
+    let mut period_keys = HashSet::new();
     for (pi, period) in mpd.periods.iter().enumerate() {
         let start = period.start.map(|d| d.as_secs_f64()).unwrap_or(cursor);
         let next_start = mpd
@@ -109,6 +120,14 @@ fn convert(url: &Url, mpd: &MPD) -> Result<Manifest> {
             .or_else(|| next_start.map(|n| n - start))
             .or_else(|| total.map(|t| t - start));
         cursor = start + duration.unwrap_or(0.0);
+        let mut period_key = match &period.id {
+            Some(id) => format!("id:{id}"),
+            None => format!("start:{}", (start * 1000.0).round() as i64),
+        };
+        if !period_keys.insert(period_key.clone()) {
+            // Duplicate ids (invalid, but seen) must not share a seq namespace.
+            period_key = format!("{period_key}#{pi}");
+        }
         let period_base = join_base(&mpd_base, &period.BaseURL)?;
         let period_protected = mpd_protected || !period.ContentProtection.is_empty();
 
@@ -127,6 +146,8 @@ fn convert(url: &Url, mpd: &MPD) -> Result<Manifest> {
                 let addressing = addressing(period, adaptation, r, &base)?;
                 reps.push(Rep {
                     period_idx: pi,
+                    period_key: period_key.clone(),
+                    period_ord: pi as u64,
                     kind: kind_of(adaptation, r),
                     bandwidth: r.bandwidth.unwrap_or(0),
                     width: r.width.or(adaptation.width),
@@ -275,6 +296,7 @@ fn addressing(p: &Period, a: &AdaptationSet, r: &Representation, base: &Url) -> 
             end_number: t.endNumber,
             duration: t.duration,
             timeline,
+            presentation_time_offset: t.presentationTimeOffset.unwrap_or(0),
             availability_time_offset: t.availabilityTimeOffset.unwrap_or(0.0),
         });
     }
@@ -292,6 +314,7 @@ fn addressing(p: &Period, a: &AdaptationSet, r: &Representation, base: &Url) -> 
                     None => base.clone(),
                 },
                 byte_range: i.range.as_deref().and_then(parse_range),
+                key: None,
             }),
             None => None,
         };
@@ -369,8 +392,9 @@ pub fn expand_template(tpl: &str, rep_id: &str, number: u64, time: u64, bandwidt
     out
 }
 
-fn seq_id(period_idx: usize, number: u64) -> u64 {
-    ((period_idx as u64) << 40) | (number & ((1 << 40) - 1))
+/// Pack a period ordinal and a per-period segment key (number, media time or hash) into a seq.
+fn seq_id(period_ord: u64, key: u64) -> u64 {
+    (period_ord << PERIOD_SHIFT) | (key & ((1 << PERIOD_SHIFT) - 1))
 }
 
 /// Segments of a template-addressed representation at wall-clock `now` (only used when live).
@@ -388,6 +412,7 @@ pub fn template_segments(
         end_number,
         duration,
         timeline,
+        presentation_time_offset,
         availability_time_offset,
     } = &rep.addressing
     else {
@@ -399,13 +424,16 @@ pub fn template_segments(
                 .base
                 .join(&expand_template(i, &rep.id, 0, 0, rep.bandwidth))?,
             byte_range: None,
+            key: None,
         }),
         None => None,
     };
     let ts = *timescale as f64;
-    let mk = |number: u64, time: u64, dur: f64| -> Result<Segment> {
+    let period_duration = rep.period_duration.filter(|d| d.is_finite() && *d >= 0.0);
+    // `key` is the dedup/resume identity within the period; `number` and `time` fill the URL.
+    let mk = |key: u64, number: u64, time: u64, dur: f64| -> Result<Segment> {
         Ok(Segment {
-            seq: seq_id(rep.period_idx, number),
+            seq: seq_id(rep.period_ord, key),
             url: rep.base.join(&expand_template(
                 media,
                 &rep.id,
@@ -417,34 +445,46 @@ pub fn template_segments(
             byte_range: None,
             key: None,
             init: init.clone(),
+            optional: false,
+            discontinuity: false,
         })
     };
     let mut out = Vec::new();
 
     if let Some(tl) = timeline {
-        let period_end_ticks = rep.period_duration.map(|d| (d * ts) as u64);
+        // S@t is media time; the period starts at presentationTimeOffset (ISO 23009-1 5.3.9.6).
+        let pto = *presentation_time_offset;
+        let first_t = tl.first().and_then(|e| e.t).unwrap_or(0);
+        let end = period_duration
+            .map(|d| pto.saturating_add((d * ts).round() as u64))
+            // A timeline that starts at or past the period end means PTO is missing or wrong:
+            // keep what the timeline lists rather than dropping everything.
+            .filter(|end| first_t < *end);
         let mut number = *start_number;
         let mut time = 0u64;
-        for e in tl {
+        for (i, e) in tl.iter().enumerate() {
             if let Some(t) = e.t {
                 time = t;
+            }
+            if e.d == 0 {
+                continue;
             }
             let repeats = if e.r >= 0 {
                 e.r as u64
             } else {
-                // Repeat until the period ends (or the next entry's start when present).
-                match period_end_ticks {
-                    Some(end) if end > time && e.d > 0 => {
-                        (end - time).div_ceil(e.d).saturating_sub(1)
-                    }
+                // Repeat until the next entry's start, else until the period ends.
+                match tl.get(i + 1).and_then(|n| n.t).or(end) {
+                    Some(limit) if limit > time => (limit - time).div_ceil(e.d) - 1,
                     _ => 0,
                 }
             };
             for _ in 0..=repeats {
-                if end_number.is_some_and(|e| number > e) {
+                if end_number.is_some_and(|n| number > n) || end.is_some_and(|end| time >= end) {
                     break;
                 }
-                out.push(mk(number, time, e.d as f64 / ts)?);
+                // Keyed by media time: live packagers slide the window without changing
+                // startNumber, so positions (and $Number$) are not stable across refreshes.
+                out.push(mk(time, number, time, e.d as f64 / ts)?);
                 number += 1;
                 time += e.d;
             }
@@ -458,42 +498,80 @@ pub fn template_segments(
         ));
     };
     let seg_secs = dur / ts;
+    // Segments the period can hold; the last one is truncated when the duration is not a
+    // multiple of the segment duration.
+    let period_count = period_duration.map(|d| (d / seg_secs).ceil() as i64);
+    let by_number = end_number.map(|e| e as i64 - *start_number as i64 + 1);
     let (first, last) = if live {
         let ast = m
             .availability_start
             .ok_or_else(|| Error::Parse("dynamic MPD without availabilityStartTime".into()))?;
-        let elapsed = (now - ast).to_std().map(|d| d.as_secs_f64()).unwrap_or(0.0)
-            - rep.period_start
-            + availability_time_offset;
-        let latest = (elapsed / seg_secs).floor() as i64 - 1;
-        let depth = m
-            .time_shift_buffer
-            .map(|d| d.as_secs_f64())
-            .unwrap_or(f64::INFINITY);
-        let earliest = ((elapsed - depth) / seg_secs).floor().max(0.0) as i64;
+        let since_start =
+            (now - ast).to_std().map(|d| d.as_secs_f64()).unwrap_or(0.0) - rep.period_start;
+        let ato = *availability_time_offset;
+        let (elapsed, latest) = if ato.is_finite() {
+            let elapsed = since_start + ato;
+            (elapsed, (elapsed / seg_secs).floor() as i64 - 1)
+        } else {
+            // availabilityTimeOffset="INF": everything up to the period end is available.
+            let latest = match period_count {
+                Some(c) => c - 1,
+                None => (since_start / seg_secs).floor() as i64 - 1,
+            };
+            (since_start, latest)
+        };
+        // A period that has ended (or ends at a known time) never grows past its end.
+        let latest = period_count.map_or(latest, |c| latest.min(c - 1));
+        let earliest = match m.time_shift_buffer.map(|d| d.as_secs_f64()) {
+            Some(depth) if depth.is_finite() => {
+                ((elapsed - depth) / seg_secs).floor().max(0.0) as i64
+            }
+            _ => 0,
+        };
         (earliest, latest)
     } else {
-        let count = rep
-            .period_duration
-            .map(|d| (d / seg_secs).ceil() as i64)
-            .unwrap_or(0);
+        let count = match (by_number, period_count) {
+            (Some(n), Some(c)) => n.min(c),
+            (Some(n), None) => n,
+            (None, Some(c)) => c,
+            (None, None) => {
+                return Err(Error::Parse(
+                    "static SegmentTemplate without a period duration or endNumber".into(),
+                ))
+            }
+        };
         (0, count - 1)
     };
-    let cap = end_number
-        .map(|e| e.saturating_sub(*start_number) as i64)
-        .unwrap_or(i64::MAX);
+    let cap = by_number.map(|n| n - 1).unwrap_or(i64::MAX);
     for idx in first.max(0)..=last.min(cap) {
         let number = *start_number + idx as u64;
-        let dur_secs = match rep.period_duration {
-            Some(d) if !live => (d - idx as f64 * seg_secs).min(seg_secs).max(0.0),
-            _ => seg_secs,
+        let dur_secs = match period_duration {
+            Some(d) => (d - idx as f64 * seg_secs).min(seg_secs).max(0.0),
+            None => seg_secs,
         };
-        out.push(mk(number, (idx as f64 * dur) as u64, dur_secs)?);
+        let mut seg = mk(number, number, (idx as f64 * dur) as u64, dur_secs)?;
+        // The duration-derived last segment may not exist: MPD durations usually follow the
+        // longest track, so a shorter track has one segment fewer. endNumber settles it.
+        seg.optional = period_count == Some(idx + 1)
+            && dur_secs < seg_secs
+            && !matches!(by_number, Some(n) if n <= idx + 1);
+        out.push(seg);
     }
     Ok(out)
 }
 
-pub fn list_segments(rep: &Rep) -> Vec<Segment> {
+/// Stable 40-bit key for a list entry that has no number of its own.
+fn list_key(url: &Url, range: Option<(u64, u64)>) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    url.as_str().hash(&mut h);
+    range.hash(&mut h);
+    h.finish()
+}
+
+/// Segments of a SegmentList representation. Live lists slide, so their entries are keyed
+/// by URL and byte range rather than by position.
+pub fn list_segments(rep: &Rep, live: bool) -> Vec<Segment> {
     let Addressing::List {
         init,
         items,
@@ -506,12 +584,21 @@ pub fn list_segments(rep: &Rep) -> Vec<Segment> {
         .iter()
         .enumerate()
         .map(|(i, (url, range))| Segment {
-            seq: seq_id(rep.period_idx, i as u64),
+            seq: seq_id(
+                rep.period_ord,
+                if live {
+                    list_key(url, *range)
+                } else {
+                    i as u64
+                },
+            ),
             url: url.clone(),
             duration: duration.unwrap_or(0.0),
             byte_range: *range,
             key: None,
             init: init.clone(),
+            optional: false,
+            discontinuity: false,
         })
         .collect()
 }
@@ -528,12 +615,14 @@ pub async fn base_segments(client: &Client, rep: &Rep) -> Result<Vec<Segment>> {
     let Some((idx_off, idx_len)) = index_range else {
         // No index: the whole file is one segment (it carries its own moov).
         return Ok(vec![Segment {
-            seq: seq_id(rep.period_idx, 0),
+            seq: seq_id(rep.period_ord, 0),
             url: rep.base.clone(),
             duration: rep.period_duration.unwrap_or(0.0),
             byte_range: None,
             key: None,
             init: None,
+            optional: false,
+            discontinuity: false,
         }]);
     };
     let index = client
@@ -543,17 +632,20 @@ pub async fn base_segments(client: &Client, rep: &Rep) -> Result<Vec<Segment>> {
     let init = Some(InitSection {
         url: rep.base.clone(),
         byte_range: Some(init_range.unwrap_or((0, *idx_off))),
+        key: None,
     });
     Ok(subs
         .into_iter()
         .enumerate()
         .map(|(i, s)| Segment {
-            seq: seq_id(rep.period_idx, i as u64),
+            seq: seq_id(rep.period_ord, i as u64),
             url: rep.base.clone(),
             duration: s.duration,
             byte_range: Some((s.offset, s.size)),
             key: None,
             init: init.clone(),
+            optional: false,
+            discontinuity: false,
         })
         .collect())
 }
@@ -597,6 +689,49 @@ pub fn describe(m: &Manifest) -> StreamInfo {
     }
 }
 
+/// The highest-ranked video representation among `cands` allowed by `quality`.
+fn pick_video<'a>(cands: &[&'a Rep], quality: &Quality) -> Option<&'a Rep> {
+    let rank = |r: &&&Rep| (r.height.unwrap_or(0), r.bandwidth);
+    match quality {
+        Quality::Best => cands.iter().max_by_key(rank),
+        Quality::Worst => cands.iter().min_by_key(rank),
+        Quality::MaxHeight(h) => cands
+            .iter()
+            .filter(|r| r.height.unwrap_or(0) <= *h)
+            .max_by_key(rank),
+    }
+    .copied()
+}
+
+/// The best audio representation of the AdaptationSet matching `lang`, else the `Role=main`
+/// set, else the first set.
+fn pick_audio<'a>(cands: &[&'a Rep], lang: Option<&str>) -> Option<&'a Rep> {
+    let chosen_set = lang
+        .and_then(|l| {
+            cands
+                .iter()
+                .find(|r| r.lang.as_deref().is_some_and(|x| x.eq_ignore_ascii_case(l)))
+        })
+        .or_else(|| cands.iter().find(|r| r.default_audio))
+        .or_else(|| cands.first())
+        .map(|r| r.adaptation_id.clone())?;
+    cands
+        .iter()
+        .filter(|r| r.adaptation_id == chosen_set)
+        .max_by_key(|r| r.bandwidth)
+        .copied()
+}
+
+/// `avc1.64002a` → `avc1`: representations of one family can be stream-copied together.
+fn codec_family(codecs: &str) -> String {
+    codecs
+        .split([',', '.'])
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase()
+}
+
 /// Pick the video representation (and separate audio, if any) for the first period.
 /// Returns `(video_or_main, audio)` representation ids.
 pub fn select(
@@ -616,49 +751,19 @@ pub fn select(
         .filter(|r| r.kind == TrackKind::Audio)
         .collect();
 
-    let pick_video = |cands: &[&Rep]| -> Option<Rep> {
-        let rank = |r: &&&Rep| (r.height.unwrap_or(0), r.bandwidth);
-        match quality {
-            Quality::Best => cands.iter().max_by_key(rank),
-            Quality::Worst => cands.iter().min_by_key(rank),
-            Quality::MaxHeight(h) => cands
-                .iter()
-                .filter(|r| r.height.unwrap_or(0) <= *h)
-                .max_by_key(rank),
-        }
-        .map(|r| (**r).clone())
-    };
-    let pick_audio = |cands: &[&Rep]| -> Option<Rep> {
-        let set_of = |r: &&Rep| r.adaptation_id.clone();
-        let chosen_set = audio_lang
-            .and_then(|l| {
-                cands
-                    .iter()
-                    .find(|r| r.lang.as_deref().is_some_and(|x| x.eq_ignore_ascii_case(l)))
-            })
-            .or_else(|| cands.iter().find(|r| r.default_audio))
-            .or_else(|| cands.first())
-            .map(set_of)?;
-        cands
-            .iter()
-            .filter(|r| r.adaptation_id == chosen_set)
-            .max_by_key(|r| r.bandwidth)
-            .map(|r| (*r).clone())
-    };
-
     let (main, extra) = if video.is_empty() {
         (
-            pick_audio(&audio)
+            pick_audio(&audio, audio_lang)
                 .ok_or_else(|| Error::Parse("MPD has no video or audio representations".into()))?,
             None,
         )
     } else {
         (
-            pick_video(&video).ok_or_else(|| Error::NoVariant(format!("{quality:?}")))?,
-            pick_audio(&audio),
+            pick_video(&video, quality).ok_or_else(|| Error::NoVariant(format!("{quality:?}")))?,
+            pick_audio(&audio, audio_lang),
         )
     };
-    for r in std::iter::once(&main).chain(extra.iter()) {
+    for r in std::iter::once(main).chain(extra) {
         if r.protected {
             return Err(Error::Unsupported(
                 "this presentation uses DRM (ContentProtection); collider does not circumvent DRM"
@@ -666,7 +771,7 @@ pub fn select(
             ));
         }
     }
-    Ok((main, extra))
+    Ok((main.clone(), extra.cloned()))
 }
 
 /// A live-capable segment source for one DASH representation (followed across periods).
@@ -675,17 +780,88 @@ pub struct DashSource {
     mpd_url: Url,
     rep_id: String,
     kind: TrackKind,
+    /// The selection, re-applied in periods that do not carry `rep_id`.
+    quality: Quality,
+    lang: Option<String>,
+    height: Option<u64>,
+    codec_family: Option<String>,
+    /// `Rep::period_key` → seq namespace; survives refreshes so that dropping or adding
+    /// periods in a live MPD does not re-key the segments of the others.
+    period_ords: HashMap<String, u64>,
     manifest: Option<Manifest>,
 }
 
 impl DashSource {
-    pub fn new(client: Client, manifest: Manifest, rep: &Rep) -> Self {
+    /// `mpd_url` is the URL to re-request on refresh (the one the user gave, so redirecting
+    /// edges can reissue tokens); `manifest` was parsed against the post-redirect URL.
+    /// `rep` is the first-period choice made by [`select`] with `quality` and `audio_lang`.
+    pub fn new(
+        client: Client,
+        mpd_url: Url,
+        manifest: Manifest,
+        rep: &Rep,
+        quality: &Quality,
+        audio_lang: Option<&str>,
+    ) -> Self {
         Self {
             client,
-            mpd_url: manifest.url.clone(),
+            mpd_url,
             rep_id: rep.id.clone(),
             kind: rep.kind,
+            quality: quality.clone(),
+            lang: rep.lang.clone().or_else(|| audio_lang.map(str::to_string)),
+            height: rep.height,
+            codec_family: rep.codecs.as_deref().map(codec_family),
+            period_ords: HashMap::new(),
             manifest: Some(manifest),
+        }
+    }
+
+    /// The representation of one period to follow: the chosen id when the period has it,
+    /// else the same selection applied to that period's representations.
+    fn pick<'a>(&self, period: &[&'a Rep]) -> Option<&'a Rep> {
+        if let Some(r) = period.iter().find(|r| r.id == self.rep_id) {
+            return Some(r);
+        }
+        let cands: Vec<&Rep> = period
+            .iter()
+            .copied()
+            .filter(|r| r.kind == self.kind)
+            .collect();
+        // Stay within the codec family so the stream copy can join the periods.
+        let same_family: Vec<&Rep> = cands
+            .iter()
+            .copied()
+            .filter(|r| {
+                self.codec_family.is_some()
+                    && r.codecs.as_deref().map(codec_family) == self.codec_family
+            })
+            .collect();
+        let cands = if same_family.is_empty() {
+            cands
+        } else {
+            same_family
+        };
+        match self.kind {
+            TrackKind::Video => {
+                // Do not exceed the height chosen in the first period; if everything is
+                // taller, take the closest one.
+                let capped: Vec<&Rep> = cands
+                    .iter()
+                    .copied()
+                    .filter(|r| match (self.height, r.height) {
+                        (Some(h), Some(rh)) => rh <= h,
+                        _ => true,
+                    })
+                    .collect();
+                pick_video(&capped, &self.quality).or_else(|| {
+                    cands
+                        .iter()
+                        .copied()
+                        .min_by_key(|r| (r.height.unwrap_or(0), r.bandwidth))
+                })
+            }
+            _ => pick_audio(&cands, self.lang.as_deref()),
         }
     }
 
@@ -693,9 +869,10 @@ impl DashSource {
         let m = match self.manifest.take() {
             Some(m) => m,
             None => {
-                let body = self.client.get_bytes(&self.mpd_url, None).await?;
+                // Relative BaseURLs and media URLs resolve against the post-redirect URL.
+                let (base, body) = self.client.get_bytes_with_url(&self.mpd_url, None).await?;
                 parse(
-                    &self.mpd_url,
+                    &base,
                     std::str::from_utf8(&body).map_err(|e| Error::Parse(e.to_string()))?,
                 )?
             }
@@ -704,26 +881,27 @@ impl DashSource {
         let mut segments = Vec::new();
         let periods = m.reps.iter().map(|r| r.period_idx).max().unwrap_or(0);
         for pi in 0..=periods {
-            let rep = m
-                .reps
-                .iter()
-                .find(|r| r.period_idx == pi && r.id == self.rep_id)
-                .or_else(|| {
-                    m.reps
-                        .iter()
-                        .filter(|r| r.period_idx == pi && r.kind == self.kind)
-                        .max_by_key(|r| r.bandwidth)
-                });
-            let Some(rep) = rep else { continue };
+            let period: Vec<&Rep> = m.reps.iter().filter(|r| r.period_idx == pi).collect();
+            let Some(any) = period.first() else { continue };
+            let next = self.period_ords.len() as u64;
+            let ord = *self
+                .period_ords
+                .entry(any.period_key.clone())
+                .or_insert(next);
+            let Some(rep) = self.pick(&period) else {
+                continue;
+            };
             if rep.protected {
                 return Err(Error::Unsupported(
                     "DRM-protected period encountered".into(),
                 ));
             }
+            let mut rep = rep.clone();
+            rep.period_ord = ord;
             let segs = match &rep.addressing {
-                Addressing::Template { .. } => template_segments(rep, m.live, now, &m)?,
-                Addressing::List { .. } => list_segments(rep),
-                Addressing::Base { .. } => base_segments(&self.client, rep).await?,
+                Addressing::Template { .. } => template_segments(&rep, m.live, now, &m)?,
+                Addressing::List { .. } => list_segments(&rep, m.live),
+                Addressing::Base { .. } => base_segments(&self.client, &rep).await?,
             };
             segments.extend(segs);
         }
@@ -901,7 +1079,7 @@ mod tests {
             .iter()
             .find(|r| r.id == "l" && r.period_idx == 0)
             .unwrap();
-        let segs = list_segments(l);
+        let segs = list_segments(l, false);
         assert_eq!(segs.len(), 2);
         assert_eq!(segs[1].byte_range, Some((100, 100)));
         assert_eq!(segs[0].init.as_ref().unwrap().byte_range, Some((0, 100)));
@@ -920,5 +1098,260 @@ mod tests {
         let p2 = m.reps.iter().find(|r| r.period_idx == 1).unwrap();
         assert!(p2.protected);
         assert_eq!(p2.period_start, 6.0);
+    }
+
+    fn names(segs: &[Segment]) -> Vec<String> {
+        segs.iter()
+            .map(|s| s.url.path().rsplit('/').next().unwrap().to_string())
+            .collect()
+    }
+
+    fn at(s: &str) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&Utc)
+    }
+
+    fn source(m: &Manifest, rep: &Rep, quality: &Quality) -> DashSource {
+        let client = Client::new(&[], 0, Duration::from_secs(5)).unwrap();
+        DashSource::new(client, url(), m.clone(), rep, quality, None)
+    }
+
+    fn live_timeline(t: u64) -> String {
+        format!(
+            r#"<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="dynamic" availabilityStartTime="2026-01-01T00:00:00Z" minimumUpdatePeriod="PT2S" profiles="x">
+  <Period id="p" start="PT0S">
+    <AdaptationSet mimeType="video/mp4">
+      <SegmentTemplate timescale="1" media="s$Time$.m4s" startNumber="1">
+        <SegmentTimeline><S t="{t}" d="2" r="4"/></SegmentTimeline>
+      </SegmentTemplate>
+      <Representation id="v" bandwidth="1"/>
+    </AdaptationSet>
+  </Period>
+</MPD>"#
+        )
+    }
+
+    #[test]
+    fn sliding_time_timeline_keeps_seqs_stable() {
+        let now = Utc::now();
+        let m1 = parse(&url(), &live_timeline(100)).unwrap();
+        let m2 = parse(&url(), &live_timeline(102)).unwrap();
+        let a = template_segments(&m1.reps[0], true, now, &m1).unwrap();
+        let b = template_segments(&m2.reps[0], true, now, &m2).unwrap();
+        assert_eq!(names(&b).last().unwrap(), "s110.m4s");
+        let seen: HashSet<u64> = a.iter().map(|s| s.seq).collect();
+        let fresh: Vec<&Segment> = b.iter().filter(|s| !seen.contains(&s.seq)).collect();
+        assert_eq!(fresh.len(), 1, "only s110 is new");
+        assert_eq!(fresh[0].url.path(), "/live/s110.m4s");
+        // The same media keeps the same seq across refreshes.
+        assert_eq!(a[1].seq, b[0].seq);
+    }
+
+    fn two_periods(with_p1: bool) -> String {
+        let p1 = r#"<Period id="p1" start="PT0S" duration="PT10S">
+    <AdaptationSet mimeType="video/mp4">
+      <SegmentTemplate timescale="1" duration="2" media="p1-$Number$.m4s" startNumber="1"/>
+      <Representation id="v" bandwidth="1"/>
+    </AdaptationSet>
+  </Period>"#;
+        format!(
+            r#"<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="dynamic" availabilityStartTime="2000-01-01T00:00:00Z" publishTime="2000-01-01T00:00:00Z" minimumUpdatePeriod="PT2S" profiles="x">
+  {}
+  <Period id="p2" start="PT10S" duration="PT10S">
+    <AdaptationSet mimeType="video/mp4">
+      <SegmentTemplate timescale="1" duration="2" media="p2-$Number$.m4s" startNumber="1"/>
+      <Representation id="v" bandwidth="1"/>
+    </AdaptationSet>
+  </Period>
+</MPD>"#,
+            if with_p1 { p1 } else { "" }
+        )
+    }
+
+    #[tokio::test]
+    async fn dropping_an_expired_period_does_not_rekey_the_others() {
+        let m1 = parse(&url(), &two_periods(true)).unwrap();
+        let mut src = source(&m1, &m1.reps[0], &Quality::Best);
+        let a = src.refresh().await.unwrap().segments;
+        assert_eq!(a.len(), 10);
+        src.manifest = Some(parse(&url(), &two_periods(false)).unwrap());
+        let b = src.refresh().await.unwrap().segments;
+        assert_eq!(names(&b)[0], "p2-1.m4s");
+        let seen: HashSet<u64> = a.iter().map(|s| s.seq).collect();
+        assert!(b.iter().all(|s| seen.contains(&s.seq)), "p2 keeps its seqs");
+        // p1-1 and p2-1 share $Number$ but never a seq.
+        assert_ne!(a[0].seq, b[0].seq);
+    }
+
+    #[test]
+    fn live_number_edge_is_bounded_by_the_period() {
+        // Closed period p1 (PT10S) keeps exactly its five segments long after it ended.
+        let m = parse(&url(), &two_periods(true)).unwrap();
+        let p1 = m.reps.iter().find(|r| r.period_idx == 0).unwrap();
+        let segs = template_segments(p1, true, Utc::now(), &m).unwrap();
+        assert_eq!(names(&segs).last().unwrap(), "p1-5.m4s");
+        assert_eq!(segs.len(), 5);
+
+        let inf = |tsb: &str, dur: &str| {
+            format!(
+                r#"<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="dynamic" availabilityStartTime="2026-01-01T00:00:00Z" {tsb} profiles="x">
+  <Period id="1" start="PT0S" {dur}>
+    <AdaptationSet mimeType="video/mp4">
+      <SegmentTemplate timescale="1" duration="2" availabilityTimeOffset="INF" media="s$Number$.m4s"/>
+      <Representation id="v" bandwidth="1"/>
+    </AdaptationSet>
+  </Period>
+</MPD>"#
+            )
+        };
+        let now = at("2026-01-01T00:01:01Z");
+        // INF with a known period end: the whole period is available.
+        let m = parse(&url(), &inf("", r#"duration="PT20S""#)).unwrap();
+        let segs = template_segments(&m.reps[0], true, now, &m).unwrap();
+        assert_eq!(segs.len(), 10);
+        // INF without a period end: up to now, and never unbounded.
+        let m = parse(&url(), &inf(r#"timeShiftBufferDepth="PT30S""#, "")).unwrap();
+        let segs = template_segments(&m.reps[0], true, now, &m).unwrap();
+        assert_eq!(names(&segs).first().unwrap(), "s16.m4s");
+        assert_eq!(names(&segs).last().unwrap(), "s30.m4s");
+        let m = parse(&url(), &inf("", "")).unwrap();
+        assert_eq!(
+            template_segments(&m.reps[0], true, now, &m).unwrap().len(),
+            30
+        );
+    }
+
+    fn static_timeline(pto: u64, timeline: &str) -> Manifest {
+        let mpd = format!(
+            r#"<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT20S" profiles="x">
+  <Period>
+    <AdaptationSet mimeType="video/mp4">
+      <SegmentTemplate timescale="90000" presentationTimeOffset="{pto}" media="s$Time$-$Number$.m4s">
+        <SegmentTimeline>{timeline}</SegmentTimeline>
+      </SegmentTemplate>
+      <Representation id="v" bandwidth="1"/>
+    </AdaptationSet>
+  </Period>
+</MPD>"#
+        );
+        parse(&url(), &mpd).unwrap()
+    }
+
+    #[test]
+    fn open_ended_timeline_repeat_honours_pto_and_next_entry() {
+        let m = static_timeline(900000, r#"<S t="900000" d="180000" r="-1"/>"#);
+        let segs = template_segments(&m.reps[0], false, Utc::now(), &m).unwrap();
+        assert_eq!(segs.len(), 10, "20 s of 2 s segments after the PTO");
+        assert_eq!(names(&segs)[9], "s2520000-10.m4s");
+
+        let m = static_timeline(
+            0,
+            r#"<S t="0" d="180000" r="-1"/><S t="900000" d="450000" r="1"/>"#,
+        );
+        let segs = template_segments(&m.reps[0], false, Utc::now(), &m).unwrap();
+        assert_eq!(
+            names(&segs),
+            [
+                "s0-1.m4s",
+                "s180000-2.m4s",
+                "s360000-3.m4s",
+                "s540000-4.m4s",
+                "s720000-5.m4s",
+                "s900000-6.m4s",
+                "s1350000-7.m4s"
+            ]
+        );
+        // Entries past the period end are not emitted.
+        let m = static_timeline(0, r#"<S t="0" d="900000" r="3"/>"#);
+        let segs = template_segments(&m.reps[0], false, Utc::now(), &m).unwrap();
+        assert_eq!(segs.len(), 2);
+    }
+
+    #[test]
+    fn static_number_count_uses_end_number_and_marks_overhang_optional() {
+        let mpd = |attrs: &str, extra: &str| {
+            format!(
+                r#"<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" {attrs} profiles="x">
+  <Period>
+    <AdaptationSet mimeType="video/mp4">
+      <SegmentTemplate timescale="1" duration="2" startNumber="1" {extra} media="s$Number$.m4s"/>
+      <Representation id="v" bandwidth="1"/>
+    </AdaptationSet>
+  </Period>
+</MPD>"#
+            )
+        };
+        let segs_of = |body: String| {
+            let m = parse(&url(), &body).unwrap();
+            template_segments(&m.reps[0], false, Utc::now(), &m)
+        };
+        let segs = segs_of(mpd("", r#"endNumber="10""#)).unwrap();
+        assert_eq!(segs.len(), 10);
+        assert!(segs.iter().all(|s| !s.optional));
+        assert!(matches!(segs_of(mpd("", "")), Err(Error::Parse(_))));
+
+        // 10.3 s of presentation: a sixth, 0.3 s segment only if this track has one.
+        let segs = segs_of(mpd(r#"mediaPresentationDuration="PT10.3S""#, "")).unwrap();
+        assert_eq!(segs.len(), 6);
+        assert!(segs[5].optional && !segs[4].optional);
+        assert!((segs[5].duration - 0.3).abs() < 1e-9);
+        // An exact multiple has no optional segment, and endNumber settles the question.
+        let segs = segs_of(mpd(r#"mediaPresentationDuration="PT10S""#, "")).unwrap();
+        assert!(segs.iter().all(|s| !s.optional));
+        let segs = segs_of(mpd(
+            r#"mediaPresentationDuration="PT10.3S""#,
+            r#"endNumber="6""#,
+        ))
+        .unwrap();
+        assert_eq!(segs.len(), 6);
+        assert!(!segs[5].optional);
+    }
+
+    #[tokio::test]
+    async fn later_periods_reapply_the_selection() {
+        let mpd = r#"<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT20S" profiles="x">
+  <Period id="main" duration="PT10S">
+    <AdaptationSet mimeType="video/mp4">
+      <SegmentTemplate timescale="1" duration="2" media="$RepresentationID$-$Number$.m4s"/>
+      <Representation id="v1080" bandwidth="5000000" height="1080" codecs="avc1.64002a"/>
+      <Representation id="v360" bandwidth="600000" height="360" codecs="avc1.4d401e"/>
+    </AdaptationSet>
+    <AdaptationSet mimeType="audio/mp4" lang="sv">
+      <SegmentTemplate timescale="1" duration="2" media="$RepresentationID$-$Number$.m4s"/>
+      <Representation id="sv" bandwidth="128000" codecs="mp4a.40.2"/>
+    </AdaptationSet>
+    <AdaptationSet mimeType="audio/mp4" lang="en">
+      <Role schemeIdUri="urn:mpeg:dash:role:2011" value="main"/>
+      <SegmentTemplate timescale="1" duration="2" media="$RepresentationID$-$Number$.m4s"/>
+      <Representation id="en" bandwidth="128000" codecs="mp4a.40.2"/>
+    </AdaptationSet>
+  </Period>
+  <Period id="ad" duration="PT10S">
+    <AdaptationSet mimeType="video/mp4">
+      <SegmentTemplate timescale="1" duration="2" media="$RepresentationID$-$Number$.m4s"/>
+      <Representation id="ad_hi" bandwidth="6000000" height="1080" codecs="avc1.64002a"/>
+      <Representation id="ad_lo" bandwidth="500000" height="360" codecs="avc1.4d401e"/>
+      <Representation id="ad_hevc" bandwidth="400000" height="360" codecs="hvc1.1.6.L93"/>
+    </AdaptationSet>
+    <AdaptationSet mimeType="audio/mp4" lang="en">
+      <Role schemeIdUri="urn:mpeg:dash:role:2011" value="main"/>
+      <SegmentTemplate timescale="1" duration="2" media="$RepresentationID$-$Number$.m4s"/>
+      <Representation id="ad_en" bandwidth="256000" codecs="mp4a.40.2"/>
+    </AdaptationSet>
+    <AdaptationSet mimeType="audio/mp4" lang="sv">
+      <SegmentTemplate timescale="1" duration="2" media="$RepresentationID$-$Number$.m4s"/>
+      <Representation id="ad_sv" bandwidth="96000" codecs="mp4a.40.2"/>
+    </AdaptationSet>
+  </Period>
+</MPD>"#;
+        let m = parse(&url(), mpd).unwrap();
+        let q = Quality::MaxHeight(360);
+        let (v, a) = select(&m, &q, Some("sv")).unwrap();
+        assert_eq!(v.id, "v360");
+        let segs = source(&m, &v, &q).refresh().await.unwrap().segments;
+        assert_eq!(names(&segs)[5], "ad_lo-1.m4s");
+        let a = a.unwrap();
+        assert_eq!(a.id, "sv");
+        let segs = source(&m, &a, &q).refresh().await.unwrap().segments;
+        assert_eq!(names(&segs)[5], "ad_sv-1.m4s", "language is kept");
     }
 }

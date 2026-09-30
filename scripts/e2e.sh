@@ -73,6 +73,53 @@ printf '%s/enc/key.bin\n%s/www/enc/key.bin\n' "$BASE" "$WORK" >keyinfo
   www/dash-num/manifest.mpd
 "${FF[@]}" "${SRC[@]}" -map 0:v -map 1:a "${MP4ENC[@]}" -f dash -seg_duration 2 -single_file 1 \
   www/dash-single/manifest.mpd
+# Audio outlasts video (10.3 s vs 10 s): mediaPresentationDuration implies a sixth video
+# segment that does not exist.
+mkdir -p www/dash-overhang
+"${FF[@]}" -f lavfi -i "testsrc2=size=320x180:rate=30:duration=10" -f lavfi -i "sine=frequency=440:duration=10.3" \
+  -map 1:a -map 0:v "${MP4ENC[@]}" -f dash -seg_duration 2 -use_template 1 -use_timeline 0 \
+  www/dash-overhang/manifest.mpd
+
+# Two periods whose media timestamps both start at zero (e.g. an ad break stitched in).
+mkdir -p www/dash-mp/p1 www/dash-mp/p2
+for p in 1 2; do
+  "${FF[@]}" -f lavfi -i "testsrc2=size=320x180:rate=30" -f lavfi -i "sine=frequency=$((330 * p))" -t 6 \
+    -map 0:v -map 1:a "${MP4ENC[@]}" -f dash -seg_duration 2 -use_template 1 -use_timeline 0 \
+    www/dash-mp/p$p/manifest.mpd
+done
+python3 - www/dash-mp <<'PY'
+import re, sys
+d = sys.argv[1]
+mpd = open(f"{d}/p1/manifest.mpd").read().replace('mediaPresentationDuration="PT6.0S"', 'mediaPresentationDuration="PT12.0S"')
+period = re.search(r"<Period.*?</Period>", mpd, re.S).group(0)
+periods = "\n".join(
+    period.replace('<Period id="0" start="PT0.0S">', f'<Period id="p{i}" start="PT{6 * (i - 1)}.0S">\n<BaseURL>p{i}/</BaseURL>')
+    for i in (1, 2)
+)
+open(f"{d}/manifest.mpd", "w").write(mpd.replace(period, periods))
+PY
+
+# Master with an audio-only variant (no RESOLUTION), which must never be picked as video.
+printf '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=64000,CODECS="mp4a.40.2"\n2.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=400000,RESOLUTION=320x180\n1.m3u8\n' \
+  >www/fmp4/audio-only.m3u8
+# Fractional EXT-X-TARGETDURATION (seen in the wild, m3u8-rs only reads integers).
+sed 's/^#EXT-X-TARGETDURATION:\([0-9]*\)$/#EXT-X-TARGETDURATION:\1.0/' www/enc/index.m3u8 >www/enc/float.m3u8
+# fMP4 with an AES-128 encrypted init section (RFC 8216 §4.3.2.5: KEY with IV before MAP).
+HAVE_OPENSSL=0
+if command -v openssl >/dev/null; then
+  HAVE_OPENSSL=1
+  mkdir -p www/encinit
+  "${FF[@]}" "${SRC[@]}" "${MP4ENC[@]}" -f hls -hls_time 2 -hls_playlist_type vod -hls_segment_type fmp4 \
+    -hls_segment_filename 'www/encinit/s%03d.m4s' www/encinit/index.m3u8
+  head -c 16 /dev/urandom >www/encinit/key.bin
+  KEYHEX=$(od -An -tx1 www/encinit/key.bin | tr -d ' \n')
+  IVHEX=000102030405060708090a0b0c0d0e0f
+  for f in www/encinit/init.mp4 www/encinit/s*.m4s; do
+    openssl enc -aes-128-cbc -K "$KEYHEX" -iv "$IVHEX" -in "$f" -out "$f.enc" && mv "$f.enc" "$f"
+  done
+  sed -i.bak "s|^#EXT-X-MAP|#EXT-X-KEY:METHOD=AES-128,URI=\"key.bin\",IV=0x$IVHEX\\
+#EXT-X-MAP|" www/encinit/index.m3u8
+fi
 
 python3 "$ROOT/scripts/e2e/rangeserver.py" "$PORT" www &
 pids+=($!)
@@ -105,6 +152,11 @@ run get "$BASE/dash-num/manifest.mpd" -o dash-num.mp4
 check "DASH number template: duration ~20 s" near "$(duration dash-num.mp4)" 20 0.5
 check "DASH number template: decodes" decodes dash-num.mp4
 
+run get "$BASE/dash-overhang/manifest.mpd" -o dash-overhang.mp4
+check "DASH number template, audio longer than video: no 404 on the implied last segment" [ -s dash-overhang.mp4 ]
+check "DASH number template, audio longer than video: duration ~10.3 s" near "$(duration dash-overhang.mp4)" 10.3 0.5
+check "DASH number template, audio longer than video: decodes" decodes dash-overhang.mp4
+
 run get "$BASE/dash-single/manifest.mpd" -o dash-single.mp4
 check "DASH single-file (sidx): duration ~20 s" near "$(duration dash-single.mp4)" 20 0.5
 check "DASH single-file (sidx): decodes" decodes dash-single.mp4
@@ -113,6 +165,45 @@ run get "http://127.0.0.1:$PORT_NORANGE/dash-single/manifest.mpd" -o dash-single
 packets dash-single.mp4 >a.packets
 packets dash-single-norange.mp4 >b.packets
 check "Range-ignoring server: output identical to Range-honouring server" bash -c '[ -s a.packets ] && cmp -s a.packets b.packets'
+
+run get "$BASE/fmp4/audio-only.m3u8" -q worst -o audio-only.mkv
+check "HLS master with an audio-only variant: -q worst picks the video" [ "$(width audio-only.mkv)" = 320 ]
+
+run get "$BASE/enc/float.m3u8" -o float.mp4
+check "HLS fractional TARGETDURATION: duration ~20 s" near "$(duration float.mp4)" 20 0.5
+check "HLS fractional TARGETDURATION: decodes" decodes float.mp4
+
+if [ "$HAVE_OPENSSL" = 1 ]; then
+  run get "$BASE/encinit/index.m3u8" -o encinit.mp4
+  check "HLS fMP4 with encrypted init section: duration ~20 s" near "$(duration encinit.mp4)" 20 0.5
+  check "HLS fMP4 with encrypted init section: decodes" decodes encinit.mp4
+else
+  echo "SKIP  encrypted init section (openssl not found)"
+fi
+
+run get "$BASE/dash-mp/manifest.mpd" -o dash-mp.mp4
+check "DASH two periods, timestamps restarting: duration ~12 s" near "$(duration dash-mp.mp4)" 12 0.5
+check "DASH two periods: decodes" decodes dash-mp.mp4
+
+run get "$BASE/redir/fmp4/master.m3u8" -q 180 -o redir-hls.mkv
+check "HLS behind a 302: relative URIs resolve against the redirect target" [ "$(width redir-hls.mkv)" = 320 ]
+run get "$BASE/redir/dash-num/manifest.mpd" -o redir-dash.mp4
+check "DASH behind a 302: relative URIs resolve against the redirect target" near "$(duration redir-dash.mp4)" 20 0.5
+
+# ---------------------------------------------------------------- safety
+run get "$BASE/enc/index.m3u8" -o tty.mp4
+check "status lines reach a stderr that is not a terminal" grep -q "» HLS stream" "$WORK/last.log"
+
+cp dash-num.mp4 exists.mp4
+check "existing output: refused without --force" bash -c "! \"$BIN\" get $BASE/enc/index.m3u8 -o exists.mp4 2>/dev/null"
+check "existing output: left untouched" cmp -s exists.mp4 dash-num.mp4
+run get "$BASE/enc/index.m3u8" -o exists.mp4 --force
+check "--force: overwrites the existing output" bash -c "cmp -s <(packets exists.mp4) <(packets enc.mp4)"
+
+run get "$BASE/enc/index.m3u8" -o stale.mp4 --keep-parts
+rm -f stale.mp4
+"$BIN" get "$BASE/enc/float.m3u8" -o stale.mp4 >/dev/null 2>"$WORK/last.log"
+check "work dir of another stream: refused, not spliced in" grep -q "another download" "$WORK/last.log"
 
 # ---------------------------------------------------------------- resume
 run get "$BASE/enc/index.m3u8" -o res.mp4 --keep-parts
@@ -152,6 +243,18 @@ if [ "${E2E_SKIP_LIVE:-0}" != 1 ]; then
   run get "$BASE/dlive/manifest.mpd" -o dlive-limit.mp4 --max-duration 6
   check "live DASH (number template): --max-duration 6 gives ~6 s" near "$(duration dlive-limit.mp4)" 6 0.6
   check "live DASH: decodes" decodes dlive-limit.mp4
+
+  # The origin deletes the playlist when the stream ends, without ever writing ENDLIST.
+  mkdir -p www/gone
+  ( "${FF[@]}" -re -f lavfi -i "testsrc2=size=320x180:rate=30" -f lavfi -i "sine=frequency=550" -t 8 \
+      "${TSENC[@]}" -f hls -hls_time 1 -hls_list_size 4 -hls_flags delete_segments+omit_endlist \
+      -hls_segment_filename 'www/gone/s%05d.ts' www/gone/index.m3u8; rm -f www/gone/index.m3u8 ) &
+  pids+=($!)
+  wait_http "$BASE/gone/index.m3u8"
+  timeout 60 "$BIN" get "$BASE/gone/index.m3u8" -o gone.mp4 >/dev/null 2>"$WORK/last.log"
+  check "live HLS, playlist deleted at the end: exits 0" [ $? -eq 0 ]
+  check "live HLS, playlist deleted at the end: capture saved (>= 5 s)" awk -v d="$(duration gone.mp4)" 'BEGIN { exit !(d >= 5) }'
+  check "live HLS, playlist deleted at the end: decodes" decodes gone.mp4
 
   # Watch mode: the stream only appears 5 s after collider starts polling.
   mkdir -p www/late

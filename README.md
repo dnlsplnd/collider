@@ -13,7 +13,7 @@ command-line front end (`collider`).
 - **Parallel downloads.** Segments are fetched concurrently (`-j`), with retry and exponential backoff on network errors, `429` and `5xx`. Servers that ignore `Range` requests are handled transparently.
 - **Crash-safe resume.** Each segment is written atomically, so rerunning an interrupted command only fetches what is missing.
 - **Master playlist support.** Pick a variant with `-q best|worst|720p`. Separate audio renditions are selected by language (`--audio-lang`) and muxed in.
-- **Live recording.** collider follows live HLS playlists and dynamic MPDs, captures the DVR window, and stops on Ctrl-C or after `--max-duration` while keeping everything recorded. Gaps are reported.
+- **Live recording.** collider follows live HLS playlists and dynamic MPDs, captures the DVR window, and stops on Ctrl-C or after `--max-duration` while keeping everything recorded. A playlist that disappears at stream end, or a network outage, ends the capture with everything saved. Gaps are reported.
 - **Watch mode.** `--wait` polls until a stream exists and has segments, then records it: start it before the broadcast begins.
 - **Formats.** MPEG-TS and fragmented MP4 (`EXT-X-MAP`) segments, byte-range playlists, and packed audio.
 - **Clear-key AES-128.** Keys are carried forward across segments and IVs are derived from sequence numbers as the spec requires.
@@ -50,6 +50,11 @@ collider get https://example.com/live/manifest.mpd -o show.mp4 --wait 20
 Pressing Ctrl-C once stops gracefully. For a live stream the capture is saved. For a VOD
 download the finished segments are kept, and running the same command again resumes.
 A second Ctrl-C quits immediately.
+
+collider will not overwrite an existing output file unless you pass `--force`. It also
+refuses to resume into a `.parts` directory left behind by a different stream, variant or
+audio rendition. `--timeout` is a stall timeout: long segment transfers are fine as long as
+data keeps arriving.
 
 ## Scope and responsible use
 

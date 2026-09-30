@@ -26,16 +26,21 @@ impl Source {
 /// A fetched manifest with its detected protocol.
 pub struct Probe {
     pub protocol: Protocol,
+    /// The manifest URL as requested; live refreshes re-request it.
     pub url: Url,
+    /// The URL the manifest was finally served from, after redirects. Relative URIs in the
+    /// manifest resolve against it (RFC 8216 §4.1, RFC 3986 §5.1.3, ISO 23009-1 §5.6).
+    pub base: Url,
     pub body: Bytes,
 }
 
 pub async fn probe(client: &Client, url: &Url) -> Result<Probe> {
-    let body = client.get_bytes(url, None).await?;
-    let protocol = detect(url, &body)?;
+    let (base, body) = client.get_bytes_with_url(url, None).await?;
+    let protocol = detect(&base, &body)?;
     Ok(Probe {
         protocol,
         url: url.clone(),
+        base,
         body,
     })
 }
@@ -63,8 +68,8 @@ pub fn detect(url: &Url, body: &[u8]) -> Result<Protocol> {
 
 pub fn describe(p: &Probe) -> Result<StreamInfo> {
     match p.protocol {
-        Protocol::Hls => Ok(hls::describe(&hls::parse(&p.url, &p.body)?)),
-        Protocol::Dash => Ok(dash::describe(&dash::parse(&p.url, utf8(&p.body)?)?)),
+        Protocol::Hls => Ok(hls::describe(&hls::parse(&p.base, &p.body)?)),
+        Protocol::Dash => Ok(dash::describe(&dash::parse(&p.base, utf8(&p.body)?)?)),
     }
 }
 
@@ -72,7 +77,21 @@ pub struct PlannedTrack {
     pub name: String,
     pub kind: TrackKind,
     pub description: String,
+    /// What this track records: the media playlist, or the MPD plus representation id.
+    /// A `.parts` directory is only resumed into by a track with the same identity.
+    pub identity: String,
     pub source: Source,
+}
+
+/// `url` without query and fragment, so rotating auth tokens do not change the identity.
+fn identity(url: &Url, rep: Option<&str>) -> String {
+    let mut u = url.clone();
+    u.set_query(None);
+    u.set_fragment(None);
+    match rep {
+        Some(r) => format!("{u} representation={r}"),
+        None => u.to_string(),
+    }
 }
 
 pub struct Selection<'a> {
@@ -88,11 +107,12 @@ pub fn plan(client: &Client, p: &Probe, sel: &Selection<'_>) -> Result<Vec<Plann
 }
 
 fn plan_hls(client: &Client, p: &Probe, sel: &Selection<'_>) -> Result<Vec<PlannedTrack>> {
-    match hls::parse(&p.url, &p.body)? {
+    match hls::parse(&p.base, &p.body)? {
         hls::Manifest::Media(m) => Ok(vec![PlannedTrack {
             name: "main".into(),
             kind: TrackKind::Other,
             description: format!("media playlist, {} segments", m.segments.len()),
+            identity: identity(&p.url, None),
             source: Source::Hls(HlsSource::new(client.clone(), p.url.clone(), Some(m))),
         }]),
         hls::Manifest::Master { variants, audio } => {
@@ -111,6 +131,7 @@ fn plan_hls(client: &Client, p: &Probe, sel: &Selection<'_>) -> Result<Vec<Plann
                         .map(|c| format!(" [{c}]"))
                         .unwrap_or_default()
                 ),
+                identity: identity(&v.url, None),
                 source: Source::Hls(HlsSource::new(client.clone(), v.url.clone(), None)),
             }];
             if let Some(group) = &v.audio_group {
@@ -126,6 +147,7 @@ fn plan_hls(client: &Client, p: &Probe, sel: &Selection<'_>) -> Result<Vec<Plann
                                 .map(|l| format!(" ({l})"))
                                 .unwrap_or_default()
                         ),
+                        identity: identity(&a.url, None),
                         source: Source::Hls(HlsSource::new(client.clone(), a.url.clone(), None)),
                     });
                 }
@@ -136,7 +158,7 @@ fn plan_hls(client: &Client, p: &Probe, sel: &Selection<'_>) -> Result<Vec<Plann
 }
 
 fn plan_dash(client: &Client, p: &Probe, sel: &Selection<'_>) -> Result<Vec<PlannedTrack>> {
-    let m = dash::parse(&p.url, utf8(&p.body)?)?;
+    let m = dash::parse(&p.base, utf8(&p.body)?)?;
     let (main, audio) = dash::select(&m, sel.quality, sel.audio_lang)?;
     let describe = |r: &dash::Rep| {
         format!(
@@ -166,14 +188,30 @@ fn plan_dash(client: &Client, p: &Probe, sel: &Selection<'_>) -> Result<Vec<Plan
         .into(),
         kind: main.kind,
         description: describe(&main),
-        source: Source::Dash(DashSource::new(client.clone(), m.clone(), &main)),
+        identity: identity(&p.url, Some(&main.id)),
+        source: Source::Dash(DashSource::new(
+            client.clone(),
+            p.url.clone(),
+            m.clone(),
+            &main,
+            sel.quality,
+            sel.audio_lang,
+        )),
     }];
     if let Some(a) = audio {
         tracks.push(PlannedTrack {
             name: "audio".into(),
             kind: TrackKind::Audio,
             description: describe(&a),
-            source: Source::Dash(DashSource::new(client.clone(), m, &a)),
+            identity: identity(&p.url, Some(&a.id)),
+            source: Source::Dash(DashSource::new(
+                client.clone(),
+                p.url.clone(),
+                m,
+                &a,
+                sel.quality,
+                sel.audio_lang,
+            )),
         });
     }
     Ok(tracks)
@@ -184,8 +222,137 @@ fn utf8(b: &[u8]) -> Result<&str> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+    use std::io::{BufRead, BufReader, Write};
+
+    /// Minimal HTTP/1.1 server for tests: `routes` maps a path to `(status, extra headers, body)`.
+    /// A path listed several times answers with each entry in turn, then keeps the last.
+    /// Every request is appended to the returned log. Runs until the test process exits.
+    pub(crate) fn serve(
+        routes: Vec<(&'static str, u16, &'static str, Vec<u8>)>,
+    ) -> (Url, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log2 = log.clone();
+        std::thread::spawn(move || {
+            let mut hits = std::collections::HashMap::<String, usize>::new();
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                if reader.read_line(&mut line).is_err() {
+                    continue;
+                }
+                let path = line.split_whitespace().nth(1).unwrap_or("/").to_string();
+                loop {
+                    let mut h = String::new();
+                    if reader.read_line(&mut h).unwrap_or(0) == 0 || h == "\r\n" {
+                        break;
+                    }
+                }
+                log2.lock().unwrap().push(path.clone());
+                let matching: Vec<_> = routes.iter().filter(|r| r.0 == path).collect();
+                let n = hits.entry(path.clone()).or_default();
+                let (status, headers, body) = matching
+                    .get((*n).min(matching.len().saturating_sub(1)))
+                    .map(|r| (r.1, r.2, r.3.clone()))
+                    .unwrap_or((404, "", Vec::new()));
+                *n += 1;
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 {status} X\r\nContent-Length: {}\r\nConnection: close\r\n{headers}\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(&body);
+            }
+        });
+        (Url::parse(&format!("http://{addr}/")).unwrap(), log)
+    }
+
+    fn client() -> Client {
+        Client::new(&[], 0, std::time::Duration::from_secs(5)).unwrap()
+    }
+
+    #[tokio::test]
+    async fn hls_relative_uris_resolve_against_the_redirect_target() {
+        let master =
+            b"#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000,RESOLUTION=640x360\nv1/index.m3u8\n";
+        let media = b"#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:2,\nseg0.ts\n#EXT-X-ENDLIST\n";
+        let (root, log) = serve(vec![
+            (
+                "/master.m3u8",
+                302,
+                "Location: /edge/abc/master.m3u8\r\n",
+                Vec::new(),
+            ),
+            ("/edge/abc/master.m3u8", 200, "", master.to_vec()),
+            (
+                "/edge/abc/v1/index.m3u8",
+                302,
+                "Location: /edge2/index.m3u8\r\n",
+                Vec::new(),
+            ),
+            ("/edge2/index.m3u8", 200, "", media.to_vec()),
+        ]);
+        let c = client();
+        let p = probe(&c, &root.join("master.m3u8").unwrap()).await.unwrap();
+        assert_eq!(p.url.path(), "/master.m3u8");
+        assert_eq!(p.base.path(), "/edge/abc/master.m3u8");
+        let sel = Selection {
+            quality: &Quality::Best,
+            audio_lang: None,
+        };
+        let mut tracks = plan(&c, &p, &sel).unwrap();
+        let snap = tracks[0].source.refresh().await.unwrap();
+        assert_eq!(snap.segments[0].url.path(), "/edge2/seg0.ts");
+        // A refresh re-requests the original URL, not the redirect target.
+        assert_eq!(
+            log.lock().unwrap().as_slice(),
+            [
+                "/master.m3u8",
+                "/edge/abc/master.m3u8",
+                "/edge/abc/v1/index.m3u8",
+                "/edge2/index.m3u8"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn dash_relative_uris_resolve_against_the_redirect_target() {
+        let mpd = br#"<?xml version="1.0"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT4S">
+  <Period><AdaptationSet contentType="video" mimeType="video/mp4">
+    <SegmentTemplate initialization="init.mp4" media="seg-$Number$.m4s" startNumber="1" duration="2" timescale="1"/>
+    <Representation id="v" bandwidth="1000" width="640" height="360"/>
+  </AdaptationSet></Period>
+</MPD>"#;
+        let (root, _log) = serve(vec![
+            (
+                "/a/manifest.mpd",
+                302,
+                "Location: /b/manifest.mpd\r\n",
+                Vec::new(),
+            ),
+            ("/b/manifest.mpd", 200, "", mpd.to_vec()),
+        ]);
+        let c = client();
+        let p = probe(&c, &root.join("a/manifest.mpd").unwrap())
+            .await
+            .unwrap();
+        let sel = Selection {
+            quality: &Quality::Best,
+            audio_lang: None,
+        };
+        let mut tracks = plan(&c, &p, &sel).unwrap();
+        let snap = tracks[0].source.refresh().await.unwrap();
+        assert_eq!(snap.segments[0].url.path(), "/b/seg-1.m4s");
+        assert_eq!(
+            snap.segments[0].init.as_ref().unwrap().url.path(),
+            "/b/init.mp4"
+        );
+    }
 
     #[test]
     fn detection() {
