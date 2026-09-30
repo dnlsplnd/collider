@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/collider-core", "crates/collider-cli"]
+members = ["crates/collider-core", "crates/collider-cli", "crates/collider-gui"]
 
 [workspace.package]
 version = "0.1.0"

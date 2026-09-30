@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>collider · New download</title>
+<style>
+:root{
+  --p-950:#001726; --p-900:#001F33; --p-850:#00263F; --p-800:#003153; --p-750:#073A60;
+  --p-700:#0E4570; --p-650:#175181; --p-600:#1F5E93; --p-500:#2E6FA6; --p-400:#5A90BF;
+  --p-300:#7FB0DA; --p-200:#A6C6E2; --p-100:#D6E6F3;
+  --line:#0F4169; --line-2:#164D78;
+  --tx-1:#EEF5FA; --tx-2:#B4CADC; --tx-3:#97B3CB; --tx-dis:#6F8FAA;
+  --ac:#D9A441; --ac-hi:#E6B656; --ac-lo:#C4902F; --on-ac:#00182A; --ac-soft:#234350; --ac-line:#62654B;
+  --ok:#4CC38A; --ok-soft:#0C485C; --warn:#F0955A; --warn-soft:#264154;
+  --bad:#F4887D; --bad-soft:#273E57; --info:#6CC6E6; --info-soft:#11496B;
+  --focus:#8CC4F2;
+  --r-s:5px; --r-m:8px; --r-l:10px; --r-xl:12px;
+  --font: Inter, "Adwaita Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", "Noto Sans Mono", "Adwaita Mono", ui-monospace, monospace;
+  --shadow: 0 1px 0 rgba(0,10,20,.35), 0 6px 16px rgba(0,10,20,.28);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--p-850);color:var(--tx-1);font-family:var(--font);font-size:13.5px;line-height:1.45;
+  -webkit-font-smoothing:antialiased;overflow:hidden;font-feature-settings:"tnum" 1,"cv11" 1}
+.mono{font-family:var(--mono);font-size:12.5px;letter-spacing:-.01em}
+.ic{flex:none;display:block}
+.app{display:grid;grid-template-columns:232px 1fr;grid-template-rows:1fr 30px;height:100vh;width:100vw}
+
+/* sidebar */
+.sidebar{background:var(--p-900);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:18px 12px 14px;min-height:0}
+.brand{display:flex;align-items:center;gap:11px;padding:2px 8px 22px}
+.brand .word{font-size:19px;font-weight:650;letter-spacing:-.02em;color:var(--tx-1)}
+.brand .ver{font-family:var(--mono);font-size:11px;color:var(--tx-3);margin-left:auto;margin-top:3px}
+.nav-label{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--tx-3);padding:0 10px 8px}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav a{display:flex;align-items:center;gap:11px;height:38px;padding:0 10px;border-radius:var(--r-m);color:var(--tx-2);text-decoration:none;font-weight:500;position:relative}
+.nav a:hover{background:var(--p-800);color:var(--tx-1)}
+.nav a.on{background:var(--p-750);color:var(--tx-1);box-shadow:inset 0 0 0 1px var(--line-2)}
+.nav a.on::before{content:"";position:absolute;left:-12px;top:9px;bottom:9px;width:3px;border-radius:0 3px 3px 0;background:var(--ac)}
+.nav a.on .ic{color:var(--ac)}
+.nav .count{margin-left:auto;font-family:var(--mono);font-size:11.5px;color:var(--tx-2);background:var(--p-800);border:1px solid var(--line-2);border-radius:10px;padding:0 7px;line-height:18px}
+.nav a.on .count{background:var(--p-650);color:var(--tx-1);border-color:var(--p-500)}
+.side-foot{margin-top:auto;display:flex;flex-direction:column;gap:10px}
+.disk{background:var(--p-850);border:1px solid var(--line);border-radius:var(--r-l);padding:12px}
+.disk .row{display:flex;justify-content:space-between;font-size:12px;color:var(--tx-2);margin-bottom:8px}
+.disk .row b{color:var(--tx-1);font-weight:600}
+.disk .path{font-family:var(--mono);font-size:11.5px;color:var(--tx-3);margin-top:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* main */
+.main{display:flex;flex-direction:column;min-width:0;min-height:0}
+.topbar{height:64px;flex:none;display:flex;align-items:center;gap:10px;padding:0 24px;border-bottom:1px solid var(--line);background:var(--p-850)}
+.urlfield{flex:1;display:flex;align-items:center;gap:10px;height:40px;padding:0 12px;background:var(--p-900);border:1px solid var(--p-400);border-radius:var(--r-m);color:var(--tx-3);min-width:0}
+.urlfield .ph{flex:1;color:var(--tx-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.urlfield.focus{border-color:var(--focus);box-shadow:0 0 0 1px var(--focus)}
+.urlfield .val{flex:1;color:var(--tx-1);font-family:var(--mono);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+kbd{font-family:var(--mono);font-size:11px;color:var(--tx-2);background:var(--p-800);border:1px solid var(--line-2);border-bottom-width:2px;border-radius:4px;padding:0 5px;line-height:17px}
+.content{flex:1;min-height:0;overflow:auto;padding:22px 24px 24px}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:32px;padding:0 13px;border-radius:var(--r-m);font:600 13px/1 var(--font);letter-spacing:.005em;border:1px solid transparent;cursor:pointer;white-space:nowrap;color:var(--tx-1);background:none;text-decoration:none}
+.btn .ic{margin:0 -1px}
+.btn-lg{height:40px;padding:0 18px;font-size:14px}
+.btn-sm{height:28px;padding:0 10px;font-size:12.5px;gap:6px}
+.btn-primary{background:var(--ac);color:var(--on-ac);border-color:var(--ac-lo);box-shadow:0 1px 0 rgba(0,10,20,.4)}
+.btn-primary:hover,.btn-primary.hover{background:var(--ac-hi)}
+.btn-primary:active{background:var(--ac-lo)}
+.btn-secondary{background:var(--p-750);border-color:var(--p-400);color:var(--tx-1)}
+.btn-secondary:hover,.btn-secondary.hover{background:var(--p-700)}
+.btn-ghost{color:var(--tx-2)}
+.btn-ghost:hover,.btn-ghost.hover{background:var(--p-700);color:var(--tx-1)}
+.btn-danger{color:var(--bad);border-color:#B06C72;background:transparent}
+.btn-danger:hover{background:var(--bad-soft)}
+.btn[disabled],.btn.dis{background:var(--p-800);color:var(--tx-dis);border-color:var(--line-2);box-shadow:none;cursor:not-allowed}
+.iconbtn{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:var(--r-m);color:var(--tx-2);border:1px solid transparent;background:none}
+.iconbtn:hover,.iconbtn.hover{background:var(--p-700);color:var(--tx-1)}
+.iconbtn.bordered{border-color:var(--p-400);background:var(--p-750)}
+.focus-ring{box-shadow:0 0 0 2px var(--p-850),0 0 0 4px var(--focus)!important}
+
+/* page head / tabs */
+.pagehead{display:flex;align-items:flex-end;gap:16px;margin-bottom:16px}
+.pagehead h1{font-size:22px;font-weight:650;letter-spacing:-.015em;line-height:1.2}
+.pagehead .sub{color:var(--tx-2);font-size:13px;margin-top:4px}
+.spacer{flex:1}
+.tabs{display:flex;gap:2px;background:var(--p-900);border:1px solid var(--line);border-radius:var(--r-m);padding:3px}
+.tab{display:flex;align-items:center;gap:7px;height:30px;padding:0 12px;border-radius:6px;color:var(--tx-2);font-weight:500;font-size:13px}
+.tab:hover{background:var(--p-800);color:var(--tx-1)}
+.tab.on{background:var(--p-700);color:var(--tx-1);box-shadow:inset 0 0 0 1px var(--p-400)}
+.tab .n{font-family:var(--mono);font-size:11.5px;color:var(--tx-3)}
+.tab.on .n{color:var(--tx-2)}
+.toolbar{display:flex;align-items:center;gap:8px;margin-bottom:14px}
+
+/* cards */
+.card{background:var(--p-800);border:1px solid var(--line);border-radius:var(--r-xl);box-shadow:var(--shadow)}
+.card-h{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line)}
+.card-h h2{font-size:14.5px;font-weight:600;letter-spacing:-.005em}
+.card-h .hint{color:var(--tx-3);font-size:12.5px}
+.card-b{padding:16px 18px}
+.section-label{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--tx-3);margin:18px 2px 8px}
+.section-label:first-child{margin-top:0}
+.section-label .rule{flex:1;height:1px;background:var(--line)}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:var(--r-s);font:700 10.5px/1 var(--font);letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;border:1px solid transparent}
+.b-proto{background:var(--p-650);color:var(--tx-1);border-color:var(--p-500)}
+.b-outline{color:var(--tx-2);border-color:var(--p-400)}
+.b-live{background:var(--ac);color:var(--on-ac)}
+.b-live::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--on-ac)}
+.b-ok{background:var(--ok-soft);color:var(--ok)}
+.b-warn{background:var(--warn-soft);color:var(--warn)}
+.b-bad{background:var(--bad-soft);color:var(--bad)}
+.b-info{background:var(--info-soft);color:var(--info)}
+.b-ac{background:var(--ac-soft);color:var(--ac)}
+.b-soon{background:var(--p-750);color:var(--tx-2);border-color:var(--line-2)}
+
+/* progress */
+.bar{height:6px;border-radius:3px;background:var(--p-700);overflow:hidden;display:flex}
+.bar > i{display:block;height:100%;background:var(--p-300)}
+.bar > i.reused{background:var(--p-500)}
+.bar > i.ac{background:var(--ac)}
+.bar > i.ok{background:var(--ok)}
+
+/* job list */
+.jobs{display:flex;flex-direction:column;gap:8px}
+.job{display:grid;grid-template-columns:40px minmax(250px,1.25fr) minmax(260px,1.6fr) 132px 214px;gap:20px;align-items:center;
+  padding:14px 16px 14px 16px;background:var(--p-800);border:1px solid var(--line);border-radius:var(--r-xl);box-shadow:var(--shadow);position:relative}
+.job:hover,.job.hover{background:#04375C;border-color:var(--line-2)}
+.job.sel{border-color:var(--p-400)}
+.job .tile{width:40px;height:40px;border-radius:var(--r-l);display:flex;align-items:center;justify-content:center;background:var(--p-750);color:var(--p-200);border:1px solid var(--line-2)}
+.job .tile.live{background:var(--ac-soft);color:var(--ac);border-color:var(--ac-line)}
+.job .tile.ok{background:var(--ok-soft);color:var(--ok);border-color:#22736C}
+.job .tile.info{background:var(--info-soft);color:var(--info);border-color:#317495}
+.job .tile.muted{background:var(--p-850);color:var(--tx-2);border-color:var(--line-2)}
+.job .name{font-size:14.5px;font-weight:600;letter-spacing:-.005em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.job .meta{display:flex;align-items:center;gap:6px;margin-top:6px;color:var(--tx-3);font-size:12.5px;white-space:nowrap;overflow:hidden}
+.job .meta .host{overflow:hidden;text-overflow:ellipsis;margin-left:2px}
+.job .prog .top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px;gap:10px}
+.job .prog .state{font-weight:500;color:var(--tx-1);white-space:nowrap}
+.job .prog .state.muted{color:var(--tx-2)}
+.job .prog .val{font-family:var(--mono);font-size:12.5px;color:var(--tx-1);white-space:nowrap}
+.job .prog .bot{display:flex;gap:14px;margin-top:7px;color:var(--tx-3);font-size:12px;white-space:nowrap;overflow:hidden}
+.job .prog .bot b{color:var(--tx-2);font-weight:600}
+.job .metrics{display:flex;flex-direction:column;gap:3px;align-items:flex-end}
+.job .metrics .big{font-family:var(--mono);font-size:14px;color:var(--tx-1);font-weight:500}
+.job .metrics .small{font-size:12px;color:var(--tx-3)}
+.job .actions{display:flex;justify-content:flex-end;gap:6px;align-items:center}
+.job .note{color:var(--tx-2);font-size:12.5px;line-height:1.45}
+.job.failed{background:#022D4C}
+
+/* status bar */
+.statusbar{grid-column:1 / -1;background:var(--p-950);border-top:1px solid var(--line);display:flex;align-items:center;gap:0;padding:0 14px;font-size:12px;color:var(--tx-2);white-space:nowrap;overflow:hidden}
+.statusbar .it{display:flex;align-items:center;gap:7px;padding:0 14px;border-right:1px solid var(--line);height:16px}
+.statusbar .it:first-child{padding-left:4px}
+.statusbar .it:last-child{border-right:none}
+.statusbar b{color:var(--tx-1);font-weight:500;font-family:var(--mono);font-size:11.5px}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block;flex:none}
+
+/* forms */
+.field{display:flex;flex-direction:column;gap:6px}
+.field > label,.lbl{font-size:12.5px;font-weight:500;color:var(--tx-2)}
+.input{display:flex;align-items:center;gap:8px;height:34px;padding:0 10px;background:var(--p-850);border:1px solid var(--p-400);border-radius:var(--r-m);color:var(--tx-1);min-width:0}
+.input .v{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.input .v.mono{font-size:12.5px}
+.input .u{color:var(--tx-3);font-size:12.5px}
+.input.dis{background:var(--p-800);border-color:var(--line-2);color:var(--tx-dis)}
+.input.dis .u{color:var(--tx-dis)}
+.input.focus{border-color:var(--focus);box-shadow:0 0 0 1px var(--focus)}
+.select .ic.cd{margin-left:auto;color:var(--tx-2)}
+.help{font-size:12px;color:var(--tx-3)}
+.seg{display:inline-flex;background:var(--p-850);border:1px solid var(--p-400);border-radius:var(--r-m);padding:2px;gap:2px}
+.seg span{white-space:nowrap;height:28px;display:flex;align-items:center;gap:6px;padding:0 12px;border-radius:6px;color:var(--tx-2);font-weight:500;font-size:12.5px}
+.seg span.on{background:var(--p-600);color:var(--tx-1);box-shadow:inset 0 0 0 1px var(--p-200)}
+.toggle{width:36px;height:20px;border-radius:10px;background:var(--p-850);border:1px solid var(--p-400);position:relative;flex:none}
+.toggle::after{content:"";position:absolute;top:3px;left:3px;width:12px;height:12px;border-radius:50%;background:var(--tx-2)}
+.toggle.on{background:var(--ac);border-color:var(--ac-lo)}
+.toggle.on::after{left:19px;background:var(--on-ac)}
+.toggle.dis{background:var(--p-800);border-color:var(--line-2)}
+.toggle.dis::after{background:var(--tx-dis)}
+.slider{position:relative;height:20px;display:flex;align-items:center}
+.slider .track{height:4px;border-radius:2px;background:var(--p-650);flex:1;position:relative}
+.slider .fill{position:absolute;left:0;top:0;bottom:0;border-radius:2px;background:var(--p-300)}
+.slider .knob{position:absolute;top:50%;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;background:var(--tx-1);border:2px solid var(--p-300);box-shadow:0 1px 3px rgba(0,10,20,.5)}
+.slider .ticks{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10.5px;color:var(--tx-3);margin-top:4px}
+.check{display:flex;width:16px;height:16px;border-radius:4px;border:1px solid var(--p-400);background:var(--p-850);align-items:center;justify-content:center;flex:none}
+.check.on{background:var(--p-300);border-color:var(--p-300);color:var(--p-950)}
+.radio{display:block;width:16px;height:16px;border-radius:50%;border:1px solid var(--p-400);background:var(--p-850);flex:none;position:relative}
+.radio.on{border:1.5px solid var(--p-300)}
+.radio.on::after{content:"";position:absolute;inset:3px;border-radius:50%;background:var(--p-300)}
+.radio.dis{border-color:var(--line-2);background:var(--p-800)}
+
+/* table */
+table.t{width:100%;border-collapse:separate;border-spacing:0}
+.t th{font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--tx-3);text-align:left;padding:0 12px;height:32px;background:var(--p-750);border-bottom:1px solid var(--line-2)}
+.t th:first-child{border-top-left-radius:var(--r-m)} .t th:last-child{border-top-right-radius:var(--r-m)}
+.t td{padding:0 12px;height:38px;border-bottom:1px solid var(--line);color:var(--tx-1);white-space:nowrap}
+.t td.m{font-family:var(--mono);font-size:12.5px;color:var(--tx-2)}
+.t td.m.hi{color:var(--tx-1)}
+.t tr.sel td{background:var(--p-650);border-bottom-color:var(--p-500)}
+.t tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--ac)}
+.t tr.sel td.m{color:var(--tx-1)}
+.t tr.hov td{background:var(--p-700)}
+.t tr:last-child td{border-bottom:none}
+.num{text-align:right}
+
+.spinner{width:16px;height:16px;border-radius:50%;border:2px solid var(--p-600);border-top-color:var(--info);flex:none}
+.kv{display:flex;flex-direction:column;gap:3px}
+.kv .k{font-size:11.5px;color:var(--tx-3);font-weight:500;letter-spacing:.02em}
+.kv .v{font-family:var(--mono);font-size:13px;color:var(--tx-1)}
+.c-ok{color:var(--ok)} .c-ac{color:var(--ac)} .c-info{color:var(--info)} .c-bad{color:var(--bad)} .c-warn{color:var(--warn)} .c-2{color:var(--tx-2)} .c-3{color:var(--tx-3)}
+.vr{width:1px;align-self:stretch;background:var(--line)}
+
+.content{padding-top:14px}
+.colL .card-h{padding:11px 16px}
+.sum{padding:14px 18px!important}
+.crumbs{display:flex;align-items:center;gap:10px;margin-bottom:12px;font-size:13px;color:var(--tx-1);font-weight:500}
+.crumbs a{display:flex;align-items:center;gap:6px;color:var(--tx-2)}
+.cols{display:grid;grid-template-columns:minmax(0,1fr) 372px;gap:16px;align-items:start}
+.colL,.colR{display:flex;flex-direction:column;gap:12px;min-width:0}
+.sum{padding:16px 18px;display:flex;align-items:center;gap:24px}
+.sum-t{display:flex;gap:14px;align-items:center;flex:none}
+.sum .h{font-size:17px;font-weight:650;letter-spacing:-.01em}
+.sum .h{white-space:nowrap}
+.sum .meta{flex-wrap:nowrap;display:flex;gap:6px;align-items:center;margin-top:7px;font-size:12.5px;white-space:nowrap}
+.tile{width:44px;height:44px;border-radius:var(--r-l);display:flex;align-items:center;justify-content:center;background:var(--p-750);color:var(--p-200);border:1px solid var(--line-2);flex:none}
+.tile.muted{width:40px;height:40px;background:var(--p-850);color:var(--tx-2)}
+.kvs{display:flex;gap:18px;padding-left:22px;border-left:1px solid var(--line);flex:1;justify-content:space-between;min-width:0}
+.card-h .seg span{height:26px}
+.card-h .seg{padding:2px}
+.t td{height:32px}
+.twocol{display:grid;grid-template-columns:1.25fr 1fr;gap:12px}
+.opts{padding:5px 8px 6px}
+.opt{display:flex;align-items:center;gap:12px;height:32px;padding:0 10px;border-radius:var(--r-m);font-size:13px}
+.opt.on{background:var(--p-650);box-shadow:inset 0 0 0 1px var(--p-500)}
+.opt .grow{flex:1;min-width:0}
+.opt.dis{color:var(--tx-dis)} .opt.dis .check{border-color:var(--line-2);background:var(--p-800)}
+.opt .mono{font-size:12px}
+.form{display:flex;flex-direction:column;gap:14px}
+.row{display:flex;align-items:center;gap:10px}
+.lbl .ic{display:inline-block;vertical-align:-3px;margin-right:6px}
+.slider-ticks{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10.5px;color:var(--tx-3);margin-top:-2px}
+.live-grp{border:1px dashed var(--line-2);border-radius:var(--r-l);padding:10px 12px 12px;display:flex;flex-direction:column;gap:10px;background:var(--p-850)}
+.startbar{padding:14px 18px 18px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:12px;background:var(--p-750);border-radius:0 0 var(--r-xl) var(--r-xl)}
+.est{display:flex;justify-content:space-between;align-items:center}
+.est b{font-size:16px;color:var(--tx-1);font-weight:500}
+.drm-ex{border:1px dashed var(--p-500);border-radius:var(--r-xl);padding:8px 8px 8px}
+.ex-lbl{font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--tx-3);padding:0 6px 7px}
+.drm{background:var(--p-800);border:1px solid var(--line);border-radius:var(--r-l);padding:10px 12px;display:flex;align-items:center;gap:14px}
+@media (max-width:1300px){
+  .cols{grid-template-columns:minmax(0,1fr) 320px}
+  .kvs{display:none}
+  .twocol{grid-template-columns:1fr}
+  .t th:nth-child(6),.t td:nth-child(6){display:none}
+}
+
+@media (max-width:1300px){
+  .app{grid-template-columns:64px 1fr}
+  .sidebar{padding:16px 10px 12px}
+  .brand{justify-content:center;padding:2px 0 20px}
+  .brand .word,.brand .ver,.nav-label,.nav a span:not(.count),.disk{display:none}
+  .nav a{justify-content:center;padding:0}
+  .nav a.on::before{left:-10px}
+  .nav .count{position:absolute;top:2px;right:2px;margin:0;padding:0 4px;font-size:10px;line-height:15px}
+}
+</style></head>
+<body><div class="app">
+<aside class="sidebar">
+  <div class="brand"><svg class="logo-mark" width="30" height="30" viewBox="0 0 30 30" aria-hidden="true">
+  <rect x="0.5" y="0.5" width="29" height="29" rx="8" fill="#0E4570" stroke="#2E6FA6"/>
+  <path d="M4.5 25.5 11.2 18.8" stroke="#6E9FCB" stroke-width="1.6" stroke-linecap="round" stroke-dasharray="1.6 2.2"/>
+  <path d="M25.5 4.5 18.8 11.2" stroke="#6E9FCB" stroke-width="1.6" stroke-linecap="round" stroke-dasharray="1.6 2.2"/>
+  <circle cx="12.4" cy="17.6" r="2.7" fill="#EEF5FA"/>
+  <circle cx="17.6" cy="12.4" r="2.7" fill="#A6C6E2"/>
+  <path d="M15 15 20.8 20.8M15 15 9.2 9.2M15 15l2.2 6.6M15 15l-6.6-2.2M15 15l6.6 2.2M15 15l-2.2-6.6" stroke="#D9A441" stroke-width="1.5" stroke-linecap="round" opacity="0"/>
+  <path d="M19.4 19.4 22 22M10.6 10.6 8 8M16.6 21.2l.8 2.4M8.8 13.4l-2.4-.8M21.2 16.6l2.4.8M13.4 8.8l-.8-2.4" stroke="#D9A441" stroke-width="1.6" stroke-linecap="round"/>
+  <circle cx="15" cy="15" r="1.5" fill="#D9A441"/>
+</svg><span class="word">collider</span><span class="ver">0.4.0</span></div>
+  <div class="nav-label">Library</div>
+  <nav class="nav"><a class="on" href="#"><svg class="ic " width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5v11.5M7 10l5 5 5-5M4.5 20h15"/></svg><span>Downloads</span><span class="count">4</span></a><a class="" href="#"><svg class="ic " width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6.5" cy="16" r="3.5"/><circle cx="17.5" cy="16" r="3.5"/><path d="M3 16 5.4 7.2A2 2 0 0 1 7.3 5.8H9.5V13M21 16l-2.4-8.8a2 2 0 0 0-1.9-1.4H14.5V13M9.5 10.5h5"/></svg><span>Watch list</span><span class="count">1</span></a><a class="" href="#"><svg class="ic " width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 7.5V12l3.5 2.2"/><path d="M4.2 9.5A8.2 8.2 0 1 1 3.8 12"/><path d="M3.6 5v4.6h4.6"/></svg><span>History</span></a><a class="" href="#"><svg class="ic " width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.20 2.88 L15.52 3.50 L16.26 6.45 L17.55 7.74 L20.50 8.48 L21.12 10.80 L18.94 12.91 L18.47 14.68 L19.30 17.60 L17.60 19.30 L14.68 18.47 L12.91 18.94 L10.80 21.12 L8.48 20.50 L7.74 17.55 L6.45 16.26 L3.50 15.52 L2.88 13.20 L5.06 11.09 L5.53 9.32 L4.70 6.40 L6.40 4.70 L9.32 5.53 L11.09 5.06Z"/><circle cx="12" cy="12" r="3"/></svg><span>Settings</span></a></nav>
+  <div class="side-foot">
+    <div class="disk">
+      <div class="row"><span>Output volume</span><b class="mono" style="font-size:12px">412 GiB free</b></div>
+      <div class="bar" style="height:5px"><i style="width:58%;background:var(--p-400)"></i></div>
+      <div class="path">~/Videos/collider</div>
+    </div>
+  </div>
+</aside>
+<div class="main">
+<div class="topbar">
+  <div class="urlfield"><svg class="ic " width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.2 13.8a3.8 3.8 0 0 0 5.4 0l3.2-3.2a3.8 3.8 0 0 0-5.4-5.4l-1.1 1.1"/><path d="M13.8 10.2a3.8 3.8 0 0 0-5.4 0l-3.2 3.2a3.8 3.8 0 0 0 5.4 5.4l1.1-1.1"/></svg><span class="val">https://cdn.openfilms.example/tears-of-steel/master.m3u8</span><span class="badge b-ok"><svg class="ic " width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.6 4.4 4.4L19 7.4"/></svg>Probed · 412 ms</span></div>
+  <button class="btn btn-secondary btn-lg"><svg class="ic " width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.3"/><path d="m15.4 15.4 4.8 4.8"/></svg>Probe</button>
+  <button class="btn btn-primary btn-lg dis" disabled><svg class="ic " width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add</button>
+</div>
+<div class="content">
+  <div class="crumbs"><a><svg class="ic " width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19.5 12h-15M10.5 6l-6 6 6 6"/></svg>Downloads</a><span class="c-3">/</span><span>New download</span></div>
+  <div class="cols">
+   <div class="colL">
+    <div class="card">
+      <div class="sum">
+        <div class="sum-t">
+          <div class="tile"><svg class="ic " width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="1.6"/><path d="M7.5 5v14M16.5 5v14M3.5 9.7h4M3.5 14.3h4M16.5 9.7h4M16.5 14.3h4"/></svg></div>
+          <div style="min-width:0"><div class="h">tears-of-steel <span class="c-3" style="font-weight:400;font-size:13px;margin-left:4px">master.m3u8</span></div>
+          <div class="meta"><span class="badge b-proto">HLS</span><span class="badge b-outline">VOD</span><span class="badge b-ok"><svg class="ic " width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.8" y="10.2" width="14.4" height="10" rx="1.4"/><path d="M8.4 10.2V7.4a3.6 3.6 0 0 1 7.2 0v2.8"/><circle cx="12" cy="15.2" r="1.2" fill="currentColor" stroke="none"/></svg>AES-128 · clear key</span></div></div>
+        </div>
+        <div class="kvs">
+          <div class="kv"><span class="k">Duration</span><span class="v">00:12:14</span></div>
+          <div class="kv"><span class="k">Segments</span><span class="v">184 × 4 s</span></div>
+          <div class="kv"><span class="k">Tracks</span><span class="v">6 video · 4 audio · 2 subs</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-h"><svg class="ic c-2" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="1.6"/><path d="M7.5 5v14M16.5 5v14M3.5 9.7h4M3.5 14.3h4M16.5 9.7h4M16.5 14.3h4"/></svg><h2>Video variant</h2><span class="spacer"></span>
+        <span class="lbl" style="margin-right:4px">Quality</span>
+        <div class="seg"><span>Best</span><span>Worst</span><span class="on">Max height</span></div>
+        <div class="input select" style="width:104px;height:34px"><span class="v mono">1080p</span><svg class="ic cd" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6.5 9.5 5.5 5.5 5.5-5.5"/></svg></div>
+      </div>
+      <div style="padding:6px 10px 8px">
+      <table class="t"><thead><tr><th></th><th>ID</th><th>Resolution</th><th class="num">Bitrate</th><th class="num">FPS</th><th>Codecs</th><th class="num">Est. size</th></tr></thead><tbody><tr class=""><td style="width:36px"><span class="radio "></span></td>
+<td class="m">v0</td><td class="m hi">3840×2160</td><td class="m num">15.2 Mbit/s</td><td class="m num">24</td><td class="m">avc1.640033, mp4a.40.2</td><td class="m num">1.33 GiB</td></tr><tr class=""><td style="width:36px"><span class="radio "></span></td>
+<td class="m">v1</td><td class="m hi">2560×1440</td><td class="m num">9.8 Mbit/s</td><td class="m num">24</td><td class="m">avc1.640032, mp4a.40.2</td><td class="m num">882 MiB</td></tr><tr class="sel"><td style="width:36px"><span class="radio on"></span></td>
+<td class="m">v2</td><td class="m hi">1920×1080 <span class="badge b-ac" style="margin-left:8px">Selected</span></td><td class="m num">6.0 Mbit/s</td><td class="m num">24</td><td class="m">avc1.640028, mp4a.40.2</td><td class="m num">536 MiB</td></tr><tr class=""><td style="width:36px"><span class="radio "></span></td>
+<td class="m">v3</td><td class="m hi">1280×720</td><td class="m num">3.2 Mbit/s</td><td class="m num">24</td><td class="m">avc1.64001f, mp4a.40.2</td><td class="m num">291 MiB</td></tr><tr class=""><td style="width:36px"><span class="radio "></span></td>
+<td class="m">v4</td><td class="m hi">854×480</td><td class="m num">1.4 Mbit/s</td><td class="m num">24</td><td class="m">avc1.64001e, mp4a.40.2</td><td class="m num">134 MiB</td></tr><tr class=""><td style="width:36px"><span class="radio "></span></td>
+<td class="m">v5</td><td class="m hi">640×360</td><td class="m num">0.8 Mbit/s</td><td class="m num">24</td><td class="m">avc1.42c01e, mp4a.40.2</td><td class="m num">81 MiB</td></tr></tbody></table>
+      </div>
+    </div>
+    <div class="twocol">
+      <div class="card">
+        <div class="card-h"><svg class="ic c-2" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9.2h3.6L12.5 5v14l-4.9-4.2H4z"/><path d="M15.6 9.2a3.9 3.9 0 0 1 0 5.6M18.3 6.6a7.6 7.6 0 0 1 0 10.8"/></svg><h2>Audio</h2><span class="spacer"></span><span class="hint">Preferred language</span><div class="input select" style="width:120px;height:30px"><span class="v">English</span><svg class="ic cd" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6.5 9.5 5.5 5.5 5.5-5.5"/></svg></div></div>
+        <div class="opts"><div class="opt on"><span class="radio on"></span><div class="grow"><div class="ot">English <span class="mono c-3" style="font-size:11.5px">en</span> <span class="badge b-outline" style="height:18px;margin-left:4px">Default</span></div></div><span class="mono c-2">128 kbit/s</span><span class="mono c-3" style="width:78px;text-align:right">mp4a.40.2</span></div><div class="opt "><span class="radio "></span><div class="grow"><div class="ot">Deutsch <span class="mono c-3" style="font-size:11.5px">de</span></div></div><span class="mono c-2">128 kbit/s</span><span class="mono c-3" style="width:78px;text-align:right">mp4a.40.2</span></div><div class="opt "><span class="radio "></span><div class="grow"><div class="ot">Español <span class="mono c-3" style="font-size:11.5px">es</span></div></div><span class="mono c-2">96 kbit/s</span><span class="mono c-3" style="width:78px;text-align:right">mp4a.40.2</span></div><div class="opt "><span class="radio "></span><div class="grow"><div class="ot">Svenska <span class="mono c-3" style="font-size:11.5px">sv</span></div></div><span class="mono c-2">96 kbit/s</span><span class="mono c-3" style="width:78px;text-align:right">mp4a.40.2</span></div></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><svg class="ic c-2" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="1.8"/><path d="M6.8 12.6h5.6M14.6 12.6h2.6M6.8 15.6h2.2M11.4 15.6h5.8"/></svg><h2>Subtitles</h2><span class="badge b-soon">Soon</span></div>
+        <div class="opts"><div class="opt dis"><span class="check"></span><div class="grow"><div class="ot">English <span class="mono" style="font-size:11.5px">en</span></div></div><span class="mono">WebVTT</span></div><div class="opt dis"><span class="check"></span><div class="grow"><div class="ot">Svenska <span class="mono" style="font-size:11.5px">sv</span></div></div><span class="mono">WebVTT</span></div></div>
+        <div class="help" style="padding:0 18px 14px">WebVTT and TTML renditions are detected but cannot be saved yet.</div>
+      </div>
+    </div>
+    <div class="drm-ex">
+      <div class="ex-lbl">State example · how a DRM-protected probe result is shown</div>
+      <div class="drm"><div class="tile muted"><svg class="ic " width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.2 19.5 6v5.6c0 4.9-3.4 8-7.5 9.2-4.1-1.2-7.5-4.3-7.5-9.2V6z"/><path d="M12 8.2v4.6"/><circle cx="12" cy="16.1" r="1" fill="currentColor" stroke="none"/></svg></div>
+        <div style="flex:1;min-width:0"><div style="font-weight:600">This stream is DRM-protected (Widevine)</div><div style="color:var(--tx-2);font-size:12.5px;margin-top:2px">collider only saves unprotected streams, so this one can't be downloaded.</div></div>
+        <button class="btn dis" disabled style="height:36px"><svg class="ic " width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5v11.5M7 10l5 5 5-5M4.5 20h15"/></svg>Start download</button>
+      </div>
+    </div>
+   </div>
+   <div class="colR">
+    <div class="card out">
+      <div class="card-h"><svg class="ic c-2" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h8.5M16.5 7H20M4 17h3.5M11.5 17H20"/><circle cx="14.5" cy="7" r="2"/><circle cx="9.5" cy="17" r="2"/></svg><h2>Output</h2></div>
+      <div class="card-b form">
+        <div class="field"><label>Save to</label><div class="row"><div class="input" style="flex:1"><svg class="ic c-2" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 18.5V6.2a.9.9 0 0 1 .9-.9h4.9l2.2 2.3h7.2a.9.9 0 0 1 .9.9v2"/><path d="M3.5 18.5 6.4 11h15l-2.9 7.5z"/></svg><span class="v mono">~/Videos/collider</span></div><button class="btn btn-secondary" style="height:34px">Change…</button></div></div>
+        <div class="field"><label>File name</label><div class="input"><span class="v">tears-of-steel-1080p</span><span class="u mono">.mkv</span></div></div>
+        <div class="field"><label>Container</label><div class="row"><div class="seg"><span>mp4</span><span class="on">mkv</span></div><span class="help" style="flex:1">Lossless remux, no re-encode</span></div></div>
+        <div class="field"><div class="row" style="justify-content:space-between"><label class="lbl">Parallel segments</label><span class="mono" style="color:var(--tx-1)">8</span></div>
+          <div class="slider"><div class="track"><div class="fill" style="width:22.6%"></div><div class="knob" style="left:22.6%"></div></div></div>
+          <div class="slider-ticks"><span>1</span><span>8</span><span>16</span><span>24</span><span>32</span></div></div>
+        <div class="field"><div class="row" style="justify-content:space-between"><label class="lbl">Bandwidth limit</label><span class="toggle on"></span></div>
+          <div class="input"><span class="v mono">20</span><span class="u">MiB/s</span></div></div>
+        <div class="live-grp">
+          <div class="row" style="justify-content:space-between"><span class="lbl" style="color:var(--tx-2)"><svg class="ic " width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="1.8" fill="currentColor" stroke="none"/><path d="M8.6 8.6a4.8 4.8 0 0 0 0 6.8M15.4 8.6a4.8 4.8 0 0 1 0 6.8M5.7 5.7a8.9 8.9 0 0 0 0 12.6M18.3 5.7a8.9 8.9 0 0 1 0 12.6"/></svg>Live options</span><span class="help">Live streams only</span></div>
+          <div class="row"><div class="field" style="flex:1"><label style="color:var(--tx-dis)">Max duration</label><div class="input dis"><span class="v mono">hh:mm:ss</span></div></div>
+          <div class="field" style="width:132px"><label style="color:var(--tx-dis)">Wait for live</label><div class="row" style="height:34px"><span class="toggle dis"></span><span style="color:var(--tx-dis);font-size:12.5px">poll 20 s</span></div></div></div>
+        </div>
+      </div>
+      <div class="startbar">
+        <div class="est"><div><div class="c-3" style="font-size:12px">Estimated size</div><div class="c-2" style="font-size:12.5px;margin-top:2px">1920×1080 · English · 368 segments</div></div><b class="mono">≈ 536 MiB</b></div>
+        <button class="btn btn-primary btn-lg" style="width:100%;height:44px;font-size:14.5px"><svg class="ic " width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5v11.5M7 10l5 5 5-5M4.5 20h15"/></svg>Start download</button>
+      </div>
+    </div>
+   </div>
+  </div>
+</div></div>
+<footer class="statusbar">
+  <div class="it"><svg class="ic " width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5v11.5M7 10l5 5 5-5M4.5 20h15"/></svg><span>Total</span><b>62.8 MiB/s</b></div>
+  <div class="it"><span class="dot" style="background:var(--p-300)"></span><span>2 downloading</span></div>
+  <div class="it"><span class="dot" style="background:var(--ac)"></span><span>1 recording</span></div>
+  <div class="it"><span class="dot" style="background:var(--info)"></span><span>1 watching</span></div>
+  <div style="flex:1"></div>
+  <div class="it" style="color:var(--tx-2)"><svg class="ic c-ok" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.8"/><path d="m8.2 12.4 2.6 2.6 5-5.2"/></svg><span style="color:var(--ok)">ffmpeg 7.1</span><span>detected</span></div>
+  <div class="it"><span>/usr/bin/ffmpeg</span></div>
+</footer>
+</div>
+<script></script>
+</body></html>

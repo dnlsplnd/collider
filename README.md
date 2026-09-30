@@ -5,7 +5,7 @@
 collider treats stream capture as an engineering problem: parallel segment fetching,
 crash-safe resume, correct decryption of clear-key AES-128, live-playlist following,
 and lossless remuxing. It is built as a reusable engine (`collider-core`) with a
-command-line front end (`collider`).
+command-line front end (`collider`) and a desktop app (`collider-gui`).
 
 ## Features
 
@@ -19,6 +19,22 @@ command-line front end (`collider`).
 - **Clear-key AES-128.** Keys are carried forward across segments and IVs are derived from sequence numbers as the spec requires.
 - **Lossless output.** ffmpeg remuxes with stream copy and never re-encodes. The container follows the output extension (`.mp4`, `.mkv`, ...).
 
+## Desktop app
+
+![The collider desktop app: a live recording, downloads in progress, a watched stream and finished jobs](docs/screenshots/downloads.png)
+
+`collider-gui` puts the same engine behind a window in Prussian Blue. Paste a link and
+**Probe** it to see its variants, audio renditions, duration and size estimate, then pick
+quality, audio, container and file name; or press **Add** to start at once with your
+defaults. Live streams are recorded until you press **Stop and save**, and a link that is
+not live yet can be watched until the broadcast begins. Each job has a detail page with a
+segment map, throughput graph, tracks and an event log. Downloads can be paused and
+resumed, finished jobs are kept in a history, and settings (output folder, quality,
+parallelism, custom HTTP headers, UI scale) are saved automatically. The design system is
+documented in [docs/design](docs/design/deep-prussian/spec.md).
+
+![Job details: recording time, segment map, throughput, tracks and the event log](docs/screenshots/details.png)
+
 ## Install
 
 ```sh
@@ -26,11 +42,12 @@ scripts/install.sh           # build, then install to /usr/local (asks for your 
 scripts/install.sh --user    # or install to ~/.local, no root needed
 ```
 
-This installs the `collider` command and a **Collider** start-menu entry (under Internet).
-The entry opens a terminal with a short cheat sheet and offers to download a pasted URL
-into your Downloads folder. `scripts/install.sh --uninstall` removes everything again (add
-`--user` if you installed with it). Elsewhere, or without the menu entry:
-`cargo install --path crates/collider-cli`.
+This installs the `collider` command, the `collider-gui` app and two start-menu entries
+(under Internet): **Collider** opens the app, and **Collider Terminal** opens a terminal
+with a short cheat sheet that offers to download a pasted URL into your Downloads folder.
+`scripts/install.sh --uninstall` removes everything again (add `--user` if you installed
+with it). Elsewhere, or without the menu entries: `cargo install --path crates/collider-cli`
+and `cargo install --path crates/collider-gui`.
 
 ffmpeg is optional but recommended. Without it, collider saves the raw `.ts`/`.mp4` stream files.
 
@@ -77,6 +94,7 @@ you access.
 - [x] Live recording with graceful stop, duration limits and gap reports
 - [x] MPEG-DASH: templates, timelines, lists, single-file `sidx`, multi-period, live
 - [x] Watch mode (`--wait`) that records a stream as soon as it goes live
+- [x] Desktop app: probe, quality and audio choice, live recording, watch list, history
 - [ ] Pipelined live capture (download while polling) and clock-skew correction via `UTCTiming`
 - [ ] Bandwidth limiting and per-host connection caps
 - [ ] Subtitles (WebVTT / TTML renditions) and chapters
@@ -91,7 +109,12 @@ you access.
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo build && scripts/e2e.sh   # end-to-end: ffmpeg-generated HLS/DASH fixtures, live streams, resume, watch mode
+# Render every page of the app, with a demo scene, to PNG (needs a GPU):
+COLLIDER_GUI_SHOTS=/tmp/shots cargo test -p collider-gui render_pages -- --ignored
 ```
+
+The app's tests drive it through its UI with `egui_kittest`: they probe and download an
+ffmpeg-made stream, and record a live one until Stop and save.
 
 ## License
 

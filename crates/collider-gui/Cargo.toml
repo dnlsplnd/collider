@@ -1,0 +1,32 @@
+[package]
+name = "collider-gui"
+description = "Desktop app for collider: download HLS and MPEG-DASH streams and record live broadcasts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "collider-gui"
+path = "src/main.rs"
+
+[dependencies]
+collider-core = { path = "../collider-core" }
+chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
+dirs = "6"
+egui = "0.36"
+eframe = { version = "0.36", default-features = false, features = ["accesskit", "default_fonts", "glow", "persistence", "wayland", "x11"] }
+egui-phosphor = { version = "0.14", features = ["regular", "fill"] }
+open = "5"
+rfd = "0.17"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["fs", "rt-multi-thread", "sync", "time"] }
+tokio-util = "0.7"
+toml = "0.9"
+url = "2"
+fs4 = "1"
+
+[dev-dependencies]
+egui_kittest = { version = "0.36", features = ["eframe", "snapshot", "wgpu"] }
+tempfile = "3"

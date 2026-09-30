@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>collider · Downloads</title>
+<style>
+:root{
+  --p-950:#001726; --p-900:#001F33; --p-850:#00263F; --p-800:#003153; --p-750:#073A60;
+  --p-700:#0E4570; --p-650:#175181; --p-600:#1F5E93; --p-500:#2E6FA6; --p-400:#5A90BF;
+  --p-300:#7FB0DA; --p-200:#A6C6E2; --p-100:#D6E6F3;
+  --line:#0F4169; --line-2:#164D78;
+  --tx-1:#EEF5FA; --tx-2:#B4CADC; --tx-3:#97B3CB; --tx-dis:#6F8FAA;
+  --ac:#D9A441; --ac-hi:#E6B656; --ac-lo:#C4902F; --on-ac:#00182A; --ac-soft:#234350; --ac-line:#62654B;
+  --ok:#4CC38A; --ok-soft:#0C485C; --warn:#F0955A; --warn-soft:#264154;
+  --bad:#F4887D; --bad-soft:#273E57; --info:#6CC6E6; --info-soft:#11496B;
+  --focus:#8CC4F2;
+  --r-s:5px; --r-m:8px; --r-l:10px; --r-xl:12px;
+  --font: Inter, "Adwaita Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", "Noto Sans Mono", "Adwaita Mono", ui-monospace, monospace;
+  --shadow: 0 1px 0 rgba(0,10,20,.35), 0 6px 16px rgba(0,10,20,.28);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--p-850);color:var(--tx-1);font-family:var(--font);font-size:13.5px;line-height:1.45;
+  -webkit-font-smoothing:antialiased;overflow:hidden;font-feature-settings:"tnum" 1,"cv11" 1}
+.mono{font-family:var(--mono);font-size:12.5px;letter-spacing:-.01em}
+.ic{flex:none;display:block}
+.app{display:grid;grid-template-columns:232px 1fr;grid-template-rows:1fr 30px;height:100vh;width:100vw}
+
+/* sidebar */
+.sidebar{background:var(--p-900);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:18px 12px 14px;min-height:0}
+.brand{display:flex;align-items:center;gap:11px;padding:2px 8px 22px}
+.brand .word{font-size:19px;font-weight:650;letter-spacing:-.02em;color:var(--tx-1)}
+.brand .ver{font-family:var(--mono);font-size:11px;color:var(--tx-3);margin-left:auto;margin-top:3px}
+.nav-label{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--tx-3);padding:0 10px 8px}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav a{display:flex;align-items:center;gap:11px;height:38px;padding:0 10px;border-radius:var(--r-m);color:var(--tx-2);text-decoration:none;font-weight:500;position:relative}
+.nav a:hover{background:var(--p-800);color:var(--tx-1)}
+.nav a.on{background:var(--p-750);color:var(--tx-1);box-shadow:inset 0 0 0 1px var(--line-2)}
+.nav a.on::before{content:"";position:absolute;left:-12px;top:9px;bottom:9px;width:3px;border-radius:0 3px 3px 0;background:var(--ac)}
+.nav a.on .ic{color:var(--ac)}
+.nav .count{margin-left:auto;font-family:var(--mono);font-size:11.5px;color:var(--tx-2);background:var(--p-800);border:1px solid var(--line-2);border-radius:10px;padding:0 7px;line-height:18px}
+.nav a.on .count{background:var(--p-650);color:var(--tx-1);border-color:var(--p-500)}
+.side-foot{margin-top:auto;display:flex;flex-direction:column;gap:10px}
+.disk{background:var(--p-850);border:1px solid var(--line);border-radius:var(--r-l);padding:12px}
+.disk .row{display:flex;justify-content:space-between;font-size:12px;color:var(--tx-2);margin-bottom:8px}
+.disk .row b{color:var(--tx-1);font-weight:600}
+.disk .path{font-family:var(--mono);font-size:11.5px;color:var(--tx-3);margin-top:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* main */
+.main{display:flex;flex-direction:column;min-width:0;min-height:0}
+.topbar{height:64px;flex:none;display:flex;align-items:center;gap:10px;padding:0 24px;border-bottom:1px solid var(--line);background:var(--p-850)}
+.urlfield{flex:1;display:flex;align-items:center;gap:10px;height:40px;padding:0 12px;background:var(--p-900);border:1px solid var(--p-400);border-radius:var(--r-m);color:var(--tx-3);min-width:0}
+.urlfield .ph{flex:1;color:var(--tx-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.urlfield.focus{border-color:var(--focus);box-shadow:0 0 0 1px var(--focus)}
+.urlfield .val{flex:1;color:var(--tx-1);font-family:var(--mono);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+kbd{font-family:var(--mono);font-size:11px;color:var(--tx-2);background:var(--p-800);border:1px solid var(--line-2);border-bottom-width:2px;border-radius:4px;padding:0 5px;line-height:17px}
+.content{flex:1;min-height:0;overflow:auto;padding:22px 24px 24px}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:32px;padding:0 13px;border-radius:var(--r-m);font:600 13px/1 var(--font);letter-spacing:.005em;border:1px solid transparent;cursor:pointer;white-space:nowrap;color:var(--tx-1);background:none;text-decoration:none}
+.btn .ic{margin:0 -1px}
+.btn-lg{height:40px;padding:0 18px;font-size:14px}
+.btn-sm{height:28px;padding:0 10px;font-size:12.5px;gap:6px}
+.btn-primary{background:var(--ac);color:var(--on-ac);border-color:var(--ac-lo);box-shadow:0 1px 0 rgba(0,10,20,.4)}
+.btn-primary:hover,.btn-primary.hover{background:var(--ac-hi)}
+.btn-primary:active{background:var(--ac-lo)}
+.btn-secondary{background:var(--p-750);border-color:var(--p-400);color:var(--tx-1)}
+.btn-secondary:hover,.btn-secondary.hover{background:var(--p-700)}
+.btn-ghost{color:var(--tx-2)}
+.btn-ghost:hover,.btn-ghost.hover{background:var(--p-700);color:var(--tx-1)}
+.btn-danger{color:var(--bad);border-color:#B06C72;background:transparent}
+.btn-danger:hover{background:var(--bad-soft)}
+.btn[disabled],.btn.dis{background:var(--p-800);color:var(--tx-dis);border-color:var(--line-2);box-shadow:none;cursor:not-allowed}
+.iconbtn{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:var(--r-m);color:var(--tx-2);border:1px solid transparent;background:none}
+.iconbtn:hover,.iconbtn.hover{background:var(--p-700);color:var(--tx-1)}
+.iconbtn.bordered{border-color:var(--p-400);background:var(--p-750)}
+.focus-ring{box-shadow:0 0 0 2px var(--p-850),0 0 0 4px var(--focus)!important}
+
+/* page head / tabs */
+.pagehead{display:flex;align-items:flex-end;gap:16px;margin-bottom:16px}
+.pagehead h1{font-size:22px;font-weight:650;letter-spacing:-.015em;line-height:1.2}
+.pagehead .sub{color:var(--tx-2);font-size:13px;margin-top:4px}
+.spacer{flex:1}
+.tabs{display:flex;gap:2px;background:var(--p-900);border:1px solid var(--line);border-radius:var(--r-m);padding:3px}
+.tab{display:flex;align-items:center;gap:7px;height:30px;padding:0 12px;border-radius:6px;color:var(--tx-2);font-weight:500;font-size:13px}
+.tab:hover{background:var(--p-800);color:var(--tx-1)}
+.tab.on{background:var(--p-700);color:var(--tx-1);box-shadow:inset 0 0 0 1px var(--p-400)}
+.tab .n{font-family:var(--mono);font-size:11.5px;color:var(--tx-3)}
+.tab.on .n{color:var(--tx-2)}
+.toolbar{display:flex;align-items:center;gap:8px;margin-bottom:14px}
+
+/* cards */
+.card{background:var(--p-800);border:1px solid var(--line);border-radius:var(--r-xl);box-shadow:var(--shadow)}
+.card-h{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line)}
+.card-h h2{font-size:14.5px;font-weight:600;letter-spacing:-.005em}
+.card-h .hint{color:var(--tx-3);font-size:12.5px}
+.card-b{padding:16px 18px}
+.section-label{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--tx-3);margin:18px 2px 8px}
+.section-label:first-child{margin-top:0}
+.section-label .rule{flex:1;height:1px;background:var(--line)}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:var(--r-s);font:700 10.5px/1 var(--font);letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;border:1px solid transparent}
+.b-proto{background:var(--p-650);color:var(--tx-1);border-color:var(--p-500)}
+.b-outline{color:var(--tx-2);border-color:var(--p-400)}
+.b-live{background:var(--ac);color:var(--on-ac)}
+.b-live::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--on-ac)}
+.b-ok{background:var(--ok-soft);color:var(--ok)}
+.b-warn{background:var(--warn-soft);color:var(--warn)}
+.b-bad{background:var(--bad-soft);color:var(--bad)}
+.b-info{background:var(--info-soft);color:var(--info)}
+.b-ac{background:var(--ac-soft);color:var(--ac)}
+.b-soon{background:var(--p-750);color:var(--tx-2);border-color:var(--line-2)}
+
+/* progress */
+.bar{height:6px;border-radius:3px;background:var(--p-700);overflow:hidden;display:flex}
+.bar > i{display:block;height:100%;background:var(--p-300)}
+.bar > i.reused{background:var(--p-500)}
+.bar > i.ac{background:var(--ac)}
+.bar > i.ok{background:var(--ok)}
+
+/* job list */
+.jobs{display:flex;flex-direction:column;gap:8px}
+.job{display:grid;grid-template-columns:40px minmax(250px,1.25fr) minmax(260px,1.6fr) 132px 214px;gap:20px;align-items:center;
+  padding:14px 16px 14px 16px;background:var(--p-800);border:1px solid var(--line);border-radius:var(--r-xl);box-shadow:var(--shadow);position:relative}
+.job:hover,.job.hover{background:#04375C;border-color:var(--line-2)}
+.job.sel{border-color:var(--p-400)}
+.job .tile{width:40px;height:40px;border-radius:var(--r-l);display:flex;align-items:center;justify-content:center;background:var(--p-750);color:var(--p-200);border:1px solid var(--line-2)}
+.job .tile.live{background:var(--ac-soft);color:var(--ac);border-color:var(--ac-line)}
+.job .tile.ok{background:var(--ok-soft);color:var(--ok);border-color:#22736C}
+.job .tile.info{background:var(--info-soft);color:var(--info);border-color:#317495}
+.job .tile.muted{background:var(--p-850);color:var(--tx-2);border-color:var(--line-2)}
+.job .name{font-size:14.5px;font-weight:600;letter-spacing:-.005em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.job .meta{display:flex;align-items:center;gap:6px;margin-top:6px;color:var(--tx-3);font-size:12.5px;white-space:nowrap;overflow:hidden}
+.job .meta .host{overflow:hidden;text-overflow:ellipsis;margin-left:2px}
+.job .prog .top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px;gap:10px}
+.job .prog .state{font-weight:500;color:var(--tx-1);white-space:nowrap}
+.job .prog .state.muted{color:var(--tx-2)}
+.job .prog .val{font-family:var(--mono);font-size:12.5px;color:var(--tx-1);white-space:nowrap}
+.job .prog .bot{display:flex;gap:14px;margin-top:7px;color:var(--tx-3);font-size:12px;white-space:nowrap;overflow:hidden}
+.job .prog .bot b{color:var(--tx-2);font-weight:600}
+.job .metrics{display:flex;flex-direction:column;gap:3px;align-items:flex-end}
+.job .metrics .big{font-family:var(--mono);font-size:14px;color:var(--tx-1);font-weight:500}
+.job .metrics .small{font-size:12px;color:var(--tx-3)}
+.job .actions{display:flex;justify-content:flex-end;gap:6px;align-items:center}
+.job .note{color:var(--tx-2);font-size:12.5px;line-height:1.45}
+.job.failed{background:#022D4C}
+
+/* status bar */
+.statusbar{grid-column:1 / -1;background:var(--p-950);border-top:1px solid var(--line);display:flex;align-items:center;gap:0;padding:0 14px;font-size:12px;color:var(--tx-2);white-space:nowrap;overflow:hidden}
+.statusbar .it{display:flex;align-items:center;gap:7px;padding:0 14px;border-right:1px solid var(--line);height:16px}
+.statusbar .it:first-child{padding-left:4px}
+.statusbar .it:last-child{border-right:none}
+.statusbar b{color:var(--tx-1);font-weight:500;font-family:var(--mono);font-size:11.5px}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block;flex:none}
+
+/* forms */
+.field{display:flex;flex-direction:column;gap:6px}
+.field > label,.lbl{font-size:12.5px;font-weight:500;color:var(--tx-2)}
+.input{display:flex;align-items:center;gap:8px;height:34px;padding:0 10px;background:var(--p-850);border:1px solid var(--p-400);border-radius:var(--r-m);color:var(--tx-1);min-width:0}
+.input .v{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.input .v.mono{font-size:12.5px}
+.input .u{color:var(--tx-3);font-size:12.5px}
+.input.dis{background:var(--p-800);border-color:var(--line-2);color:var(--tx-dis)}
+.input.dis .u{color:var(--tx-dis)}
+.input.focus{border-color:var(--focus);box-shadow:0 0 0 1px var(--focus)}
+.select .ic.cd{margin-left:auto;color:var(--tx-2)}
+.help{font-size:12px;color:var(--tx-3)}
+.seg{display:inline-flex;background:var(--p-850);border:1px solid var(--p-400);border-radius:var(--r-m);padding:2px;gap:2px}
+.seg span{white-space:nowrap;height:28px;display:flex;align-items:center;gap:6px;padding:0 12px;border-radius:6px;color:var(--tx-2);font-weight:500;font-size:12.5px}
+.seg span.on{background:var(--p-600);color:var(--tx-1);box-shadow:inset 0 0 0 1px var(--p-200)}
+.toggle{width:36px;height:20px;border-radius:10px;background:var(--p-850);border:1px solid var(--p-400);position:relative;flex:none}
+.toggle::after{content:"";position:absolute;top:3px;left:3px;width:12px;height:12px;border-radius:50%;background:var(--tx-2)}
+.toggle.on{background:var(--ac);border-color:var(--ac-lo)}
+.toggle.on::after{left:19px;background:var(--on-ac)}
+.toggle.dis{background:var(--p-800);border-color:var(--line-2)}
+.toggle.dis::after{background:var(--tx-dis)}
+.slider{position:relative;height:20px;display:flex;align-items:center}
+.slider .track{height:4px;border-radius:2px;background:var(--p-650);flex:1;position:relative}
+.slider .fill{position:absolute;left:0;top:0;bottom:0;border-radius:2px;background:var(--p-300)}
+.slider .knob{position:absolute;top:50%;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;background:var(--tx-1);border:2px solid var(--p-300);box-shadow:0 1px 3px rgba(0,10,20,.5)}
+.slider .ticks{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10.5px;color:var(--tx-3);margin-top:4px}
+.check{display:flex;width:16px;height:16px;border-radius:4px;border:1px solid var(--p-400);background:var(--p-850);align-items:center;justify-content:center;flex:none}
+.check.on{background:var(--p-300);border-color:var(--p-300);color:var(--p-950)}
+.radio{display:block;width:16px;height:16px;border-radius:50%;border:1px solid var(--p-400);background:var(--p-850);flex:none;position:relative}
+.radio.on{border:1.5px solid var(--p-300)}
+.radio.on::after{content:"";position:absolute;inset:3px;border-radius:50%;background:var(--p-300)}
+.radio.dis{border-color:var(--line-2);background:var(--p-800)}
+
+/* table */
+table.t{width:100%;border-collapse:separate;border-spacing:0}
+.t th{font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--tx-3);text-align:left;padding:0 12px;height:32px;background:var(--p-750);border-bottom:1px solid var(--line-2)}
+.t th:first-child{border-top-left-radius:var(--r-m)} .t th:last-child{border-top-right-radius:var(--r-m)}
+.t td{padding:0 12px;height:38px;border-bottom:1px solid var(--line);color:var(--tx-1);white-space:nowrap}
+.t td.m{font-family:var(--mono);font-size:12.5px;color:var(--tx-2)}
+.t td.m.hi{color:var(--tx-1)}
+.t tr.sel td{background:var(--p-650);border-bottom-color:var(--p-500)}
+.t tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--ac)}
+.t tr.sel td.m{color:var(--tx-1)}
+.t tr.hov td{background:var(--p-700)}
+.t tr:last-child td{border-bottom:none}
+.num{text-align:right}
+
+.spinner{width:16px;height:16px;border-radius:50%;border:2px solid var(--p-600);border-top-color:var(--info);flex:none}
+.kv{display:flex;flex-direction:column;gap:3px}
+.kv .k{font-size:11.5px;color:var(--tx-3);font-weight:500;letter-spacing:.02em}
+.kv .v{font-family:var(--mono);font-size:13px;color:var(--tx-1)}
+.c-ok{color:var(--ok)} .c-ac{color:var(--ac)} .c-info{color:var(--info)} .c-bad{color:var(--bad)} .c-warn{color:var(--warn)} .c-2{color:var(--tx-2)} .c-3{color:var(--tx-3)}
+.vr{width:1px;align-self:stretch;background:var(--line)}
+
+.hint-foot{display:flex;align-items:center;justify-content:center;gap:8px;color:var(--tx-3);font-size:12.5px;margin-top:22px}
+.section-label{height:28px;margin:18px 2px 6px}
+.section-label:first-of-type{margin-top:4px}
+@media (max-width:1300px){
+  .job{grid-template-columns:40px minmax(190px,1fr) minmax(230px,1.35fr) 92px auto;gap:16px}
+  .job .metrics .small{display:none}
+  .job .metrics .big{font-size:13px}
+  .hint-foot{display:none}
+  .job .prog .bot span:nth-child(3){display:none}
+}
+@media (max-height:760px){ .content{padding-top:16px} .pagehead{margin-bottom:8px} }
+
+@media (max-width:1300px){
+  .app{grid-template-columns:64px 1fr}
+  .sidebar{padding:16px 10px 12px}
+  .brand{justify-content:center;padding:2px 0 20px}
+  .brand .word,.brand .ver,.nav-label,.nav a span:not(.count),.disk{display:none}
+  .nav a{justify-content:center;padding:0}
+  .nav a.on::before{left:-10px}
+  .nav .count{position:absolute;top:2px;right:2px;margin:0;padding:0 4px;font-size:10px;line-height:15px}
+}
+</style></head>
+<body><div class="app">
+<aside class="sidebar">
+  <div class="brand"><svg class="logo-mark" width="30" height="30" viewBox="0 0 30 30" aria-hidden="true">
+  <rect x="0.5" y="0.5" width="29" height="29" rx="8" fill="#0E4570" stroke="#2E6FA6"/>
+  <path d="M4.5 25.5 11.2 18.8" stroke="#6E9FCB" stroke-width="1.6" stroke-linecap="round" stroke-dasharray="1.6 2.2"/>
+  <path d="M25.5 4.5 18.8 11.2" stroke="#6E9FCB" stroke-width="1.6" stroke-linecap="round" stroke-dasharray="1.6 2.2"/>
+  <circle cx="12.4" cy="17.6" r="2.7" fill="#EEF5FA"/>
+  <circle cx="17.6" cy="12.4" r="2.7" fill="#A6C6E2"/>
+  <path d="M15 15 20.8 20.8M15 15 9.2 9.2M15 15l2.2 6.6M15 15l-6.6-2.2M15 15l6.6 2.2M15 15l-2.2-6.6" stroke="#D9A441" stroke-width="1.5" stroke-linecap="round" opacity="0"/>
+  <path d="M19.4 19.4 22 22M10.6 10.6 8 8M16.6 21.2l.8 2.4M8.8 13.4l-2.4-.8M21.2 16.6l2.4.8M13.4 8.8l-.8-2.4" stroke="#D9A441" stroke-width="1.6" stroke-linecap="round"/>
+  <circle cx="15" cy="15" r="1.5" fill="#D9A441"/>
+</svg><span class="word">collider</span><span class="ver">0.4.0</span></div>
+  <div class="nav-label">Library</div>
+  <nav class="nav"><a class="on" href="#"><svg class="ic " width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5v11.5M7 10l5 5 5-5M4.5 20h15"/></svg><span>Downloads</span><span class="count">4</span></a><a class="" href="#"><svg class="ic " width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6.5" cy="16" r="3.5"/><circle cx="17.5" cy="16" r="3.5"/><path d="M3 16 5.4 7.2A2 2 0 0 1 7.3 5.8H9.5V13M21 16l-2.4-8.8a2 2 0 0 0-1.9-1.4H14.5V13M9.5 10.5h5"/></svg><span>Watch list</span><span class="count">1</span></a><a class="" href="#"><svg class="ic " width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 7.5V12l3.5 2.2"/><path d="M4.2 9.5A8.2 8.2 0 1 1 3.8 12"/><path d="M3.6 5v4.6h4.6"/></svg><span>History</span></a><a class="" href="#"><svg class="ic " width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.20 2.88 L15.52 3.50 L16.26 6.45 L17.55 7.74 L20.50 8.48 L21.12 10.80 L18.94 12.91 L18.47 14.68 L19.30 17.60 L17.60 19.30 L14.68 18.47 L12.91 18.94 L10.80 21.12 L8.48 20.50 L7.74 17.55 L6.45 16.26 L3.50 15.52 L2.88 13.20 L5.06 11.09 L5.53 9.32 L4.70 6.40 L6.40 4.70 L9.32 5.53 L11.09 5.06Z"/><circle cx="12" cy="12" r="3"/></svg><span>Settings</span></a></nav>
+  <div class="side-foot">
+    <div class="disk">
+      <div class="row"><span>Output volume</span><b class="mono" style="font-size:12px">412 GiB free</b></div>
+      <div class="bar" style="height:5px"><i style="width:58%;background:var(--p-400)"></i></div>
+      <div class="path">~/Videos/collider</div>
+    </div>
+  </div>
+</aside>
+<div class="main">
+<div class="topbar">
+  <div class="urlfield"><svg class="ic " width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.2 13.8a3.8 3.8 0 0 0 5.4 0l3.2-3.2a3.8 3.8 0 0 0-5.4-5.4l-1.1 1.1"/><path d="M13.8 10.2a3.8 3.8 0 0 0-5.4 0l-3.2 3.2a3.8 3.8 0 0 0 5.4 5.4l1.1-1.1"/></svg><span class="ph">Paste an HLS or DASH URL (.m3u8 or .mpd)</span><kbd>Ctrl</kbd><kbd>L</kbd></div>
+  <button class="btn btn-secondary btn-lg"><svg class="ic " width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.3"/><path d="m15.4 15.4 4.8 4.8"/></svg>Probe</button>
+  <button class="btn btn-primary btn-lg"><svg class="ic " width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add</button>
+</div>
+<div class="content">
+  <div class="pagehead">
+    <div><h1>Downloads</h1><div class="sub">6 jobs · 4 active · 1 finished today</div></div>
+    <div class="spacer"></div>
+    <div class="tabs"><span class="tab on">All <span class="n">6</span></span><span class="tab">Active <span class="n">4</span></span><span class="tab">Completed <span class="n">1</span></span><span class="tab">Failed <span class="n">1</span></span></div>
+    <button class="btn btn-ghost"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h9M4 12h6.5M4 17h4.5M17 5v14M13.8 15.8 17 19l3.2-3.2"/></svg>Newest first<svg class="ic " width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6.5 9.5 5.5 5.5 5.5-5.5"/></svg></button>
+  </div>
+  <div class="section-label">Active <span class="mono" style="letter-spacing:0">4</span><span class="rule"></span></div>
+  <div class="jobs"><div class="job sel">
+  <div class="tile live"><svg class="ic " width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.6"/><circle cx="12" cy="12" r="4.4" fill="currentColor" stroke="none"/></svg></div>
+  <div style="min-width:0"><div class="name">city-council-live</div><div class="meta"><span class="badge b-live">Live</span><span class="badge b-proto">HLS</span><span class="host">stream.cityhall.example</span></div></div>
+  <div class="prog"><div class="top"><span class="state">Recording <span class="c-3" style="font-weight:400">· following live edge</span></span><span class="val" style="color:var(--ac)">01:12:44</span></div>
+     <canvas class="mini" id="mini" width="560" height="12" style="width:100%;height:6px;display:block;border-radius:3px"></canvas>
+     <div class="bot"><span><b>4 362</b> segments</span><span class="c-ok">0 gaps</span><span><b>1920×1080</b> avc1 + <b>en</b> mp4a</span></div></div>
+  <div class="metrics"><span class="big">6.2 Mbit/s</span><span class="small">3.15 GiB saved</span></div>
+  <div class="actions"><button class="btn btn-primary btn-sm"><svg class="ic " width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></svg>Stop and save</button><button class="iconbtn" title="More"><svg class="ic " width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5.5" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="18.5" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg></button></div>
+</div><div class="job ">
+  <div class="tile "><svg class="ic " width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5v11.5M7 10l5 5 5-5M4.5 20h15"/></svg></div>
+  <div style="min-width:0"><div class="name">sintel-4k.mpd</div><div class="meta"><span class="badge b-proto">DASH</span><span class="badge b-outline">VOD</span><span class="host">media.blender-mirror.example</span></div></div>
+  <div class="prog"><div class="top"><span class="state">Downloading <span class="c-3" style="font-weight:400">· 12 parallel</span></span><span class="val">63 %</span></div>
+     <div class="bar"><i style="width:63%"></i></div>
+     <div class="bot"><span><b>1.9 GiB</b> of <b>3.0 GiB</b></span><span>ETA <b>00:24</b></span><span><b>3840×2160</b> hev1</span></div></div>
+  <div class="metrics"><span class="big">48.0 MiB/s</span><span class="small">1 842 / 2 924 seg</span></div>
+  <div class="actions"><button class="btn btn-secondary btn-sm"><svg class="ic " width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6.5" y="5" width="3.6" height="14" rx="1" fill="currentColor" stroke="none"/><rect x="13.9" y="5" width="3.6" height="14" rx="1" fill="currentColor" stroke="none"/></svg>Pause</button><button class="iconbtn" title="Cancel"><svg class="ic " width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button><button class="iconbtn" title="More"><svg class="ic " width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5.5" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="18.5" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg></button></div>
+</div><div class="job ">
+  <div class="tile "><svg class="ic " width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19.6 9.2A8 8 0 1 0 20 13"/><path d="M20.2 4.4v4.9h-4.9"/></svg></div>
+  <div style="min-width:0"><div class="name">lecture-series-ep07.m3u8</div><div class="meta"><span class="badge b-proto">HLS</span><span class="badge b-outline">VOD</span><span class="badge b-info">Resumed</span><span class="host">vod.university.example</span></div></div>
+  <div class="prog"><div class="top"><span class="state">Downloading <span class="c-3" style="font-weight:400">· 8 parallel</span></span><span class="val">86 %</span></div>
+     <div class="bar"><i class="reused" style="width:67.4%"></i><i style="width:19.1%"></i></div>
+     <div class="bot"><span><b>812</b> of <b>1 204</b> segments reused</span><span>ETA <b>00:41</b></span></div></div>
+  <div class="metrics"><span class="big">14.0 MiB/s</span><span class="small">1 042 / 1 204 seg</span></div>
+  <div class="actions"><button class="btn btn-secondary btn-sm"><svg class="ic " width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6.5" y="5" width="3.6" height="14" rx="1" fill="currentColor" stroke="none"/><rect x="13.9" y="5" width="3.6" height="14" rx="1" fill="currentColor" stroke="none"/></svg>Pause</button><button class="iconbtn" title="Cancel"><svg class="ic " width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button><button class="iconbtn" title="More"><svg class="ic " width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5.5" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="18.5" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg></button></div>
+</div><div class="job ">
+  <div class="tile info"><svg class="ic " width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6.5" cy="16" r="3.5"/><circle cx="17.5" cy="16" r="3.5"/><path d="M3 16 5.4 7.2A2 2 0 0 1 7.3 5.8H9.5V13M21 16l-2.4-8.8a2 2 0 0 0-1.9-1.4H14.5V13M9.5 10.5h5"/></svg></div>
+  <div style="min-width:0"><div class="name">keynote-2026.m3u8</div><div class="meta"><span class="badge b-info">Watching</span><span class="badge b-proto">HLS</span><span class="host">live.devconf.example</span></div></div>
+  <div class="prog"><div class="top"><span class="state" style="display:flex;align-items:center;gap:8px"><span class="spinner"></span>Waiting for broadcast to start</span><span class="val c-info">next check 20 s</span></div>
+     <div class="bar"><i style="width:35%;background:var(--info)"></i></div>
+     <div class="bot"><span>Polling every <b>20 s</b></span><span>Checked <b>41</b> times since <b>09:12</b></span></div></div>
+  <div class="metrics"><span class="big" style="color:var(--tx-2)">—</span><span class="small">best · mp4</span></div>
+  <div class="actions"><button class="btn btn-secondary btn-sm"><svg class="ic " width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 10a7.8 7.8 0 0 1 13.6-3.4l1.9 2"/><path d="M20 4.6v4.2h-4.2"/><path d="M19.5 14a7.8 7.8 0 0 1-13.6 3.4l-1.9-2"/><path d="M4 19.4v-4.2h4.2"/></svg>Check now</button><button class="iconbtn" title="Stop watching"><svg class="ic " width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button><button class="iconbtn" title="More"><svg class="ic " width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5.5" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="18.5" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg></button></div>
+</div></div>
+  <div class="section-label">Finished <span class="mono" style="letter-spacing:0">2</span><span class="rule"></span><button class="btn btn-ghost btn-sm" style="text-transform:none;letter-spacing:0;font-weight:500">Clear finished</button></div>
+  <div class="jobs"><div class="job ">
+  <div class="tile ok"><svg class="ic " width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.8"/><path d="m8.2 12.4 2.6 2.6 5-5.2"/></svg></div>
+  <div style="min-width:0"><div class="name">open-movie-1080p.mkv</div><div class="meta"><span class="badge b-proto">HLS</span><span class="badge b-outline">VOD</span><span class="host">cdn.openfilms.example</span></div></div>
+  <div class="prog"><div class="top"><span class="state">Completed <span class="c-3" style="font-weight:400">· remuxed with ffmpeg (stream copy)</span></span><span class="val c-ok">100 %</span></div>
+     <div class="bar"><i class="ok" style="width:100%"></i></div>
+     <div class="bot"><span><b>2.4 GiB</b></span><span><b>00:14:48</b></span><span><b>1920×1080</b> avc1 · <b>en</b></span><span>Finished <b>08:57</b></span></div></div>
+  <div class="metrics"><span class="big">2.4 GiB</span><span class="small">avg 71 MiB/s</span></div>
+  <div class="actions"><button class="btn btn-secondary btn-sm"><svg class="ic " width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 18.5V6.2a.9.9 0 0 1 .9-.9h4.9l2.2 2.3h7.2a.9.9 0 0 1 .9.9v2"/><path d="M3.5 18.5 6.4 11h15l-2.9 7.5z"/></svg>Open folder</button><button class="iconbtn" title="More"><svg class="ic " width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5.5" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="18.5" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg></button></div>
+</div><div class="job failed">
+  <div class="tile muted"><svg class="ic " width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.2 19.5 6v5.6c0 4.9-3.4 8-7.5 9.2-4.1-1.2-7.5-4.3-7.5-9.2V6z"/><path d="M12 8.2v4.6"/><circle cx="12" cy="16.1" r="1" fill="currentColor" stroke="none"/></svg></div>
+  <div style="min-width:0"><div class="name">premium-channel.m3u8</div><div class="meta"><span class="badge b-proto">HLS</span><span class="badge b-bad">Not supported</span><span class="host">tv.provider.example</span></div></div>
+  <div class="prog"><div class="note"><span style="color:var(--tx-1);font-weight:500">This stream is DRM-protected (Widevine).</span><br>collider only saves streams served without protection, so nothing was downloaded.</div></div>
+  <div class="metrics"><span class="big" style="color:var(--tx-2)">—</span><span class="small">probed 08:41</span></div>
+  <div class="actions"><button class="btn btn-ghost btn-sm"><svg class="ic " width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.8"/><path d="M12 11v5.2"/><circle cx="12" cy="7.9" r="1.1" fill="currentColor" stroke="none"/></svg>Learn why</button><button class="iconbtn" title="Remove"><svg class="ic " width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 6.8h15M9.4 6.8V4.6h5.2v2.2M6.4 6.8l.9 13h9.4l.9-13M10 10.4v6M14 10.4v6"/></svg></button></div>
+</div></div>
+  <div class="hint-foot"><svg class="ic " width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.8"/><path d="M12 11v5.2"/><circle cx="12" cy="7.9" r="1.1" fill="currentColor" stroke="none"/></svg>Drop a .m3u8 or .mpd link anywhere on the window to probe it. Finished jobs move to History after 7 days.</div>
+</div></div>
+<footer class="statusbar">
+  <div class="it"><svg class="ic " width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5v11.5M7 10l5 5 5-5M4.5 20h15"/></svg><span>Total</span><b>62.8 MiB/s</b></div>
+  <div class="it"><span class="dot" style="background:var(--p-300)"></span><span>2 downloading</span></div>
+  <div class="it"><span class="dot" style="background:var(--ac)"></span><span>1 recording</span></div>
+  <div class="it"><span class="dot" style="background:var(--info)"></span><span>1 watching</span></div>
+  <div style="flex:1"></div>
+  <div class="it" style="color:var(--tx-2)"><svg class="ic c-ok" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.8"/><path d="m8.2 12.4 2.6 2.6 5-5.2"/></svg><span style="color:var(--ok)">ffmpeg 7.1</span><span>detected</span></div>
+  <div class="it"><span>/usr/bin/ffmpeg</span></div>
+</footer>
+</div>
+<script>
+const c=document.getElementById('mini'); if(c){const x=c.getContext('2d');const W=c.width,H=c.height;
+// recorded span grows to the live edge; last cells show in-flight
+const n=84,w=W/n;x.fillStyle='#0E4570';x.fillRect(0,0,W,H);x.fillStyle='#A07A30';x.fillRect(0,0,W*(n-3)/n,H);for(let i=0;i<n;i++){x.fillStyle=i<n-3?'#D9A441':(i<n-1?'#A6C6E2':'#0E4570');x.fillRect(i*w,0,w-1,H);} }
+</script>
+</body></html>
