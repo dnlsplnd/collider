@@ -73,6 +73,56 @@ pub fn describe(p: &Probe) -> Result<StreamInfo> {
     }
 }
 
+/// Like [`describe`], but for HLS also reads the media playlist of the best variant, so
+/// liveness, duration, segment count and encryption are known before downloading. A
+/// playlist encrypted with anything but clear-key AES-128 is reported as DRM rather than
+/// as an error. Reading the media playlist is best effort: on failure the master's own
+/// description is returned.
+pub async fn inspect(client: &Client, p: &Probe) -> Result<StreamInfo> {
+    if p.protocol != Protocol::Hls {
+        return describe(p);
+    }
+    let manifest = match hls::parse(&p.base, &p.body) {
+        Err(Error::Unsupported(_)) => return Ok(drm_info()),
+        other => other?,
+    };
+    let mut info = hls::describe(&manifest);
+    if let hls::Manifest::Master { variants, .. } = &manifest {
+        let Ok(best) = hls::select_variant(variants, &Quality::Best) else {
+            return Ok(info);
+        };
+        let media = client
+            .get_bytes_with_url(&best.url, None)
+            .await
+            .and_then(|(base, body)| hls::parse(&base, &body));
+        match media {
+            Ok(m @ hls::Manifest::Media(_)) => {
+                let m = hls::describe(&m);
+                info.live = m.live;
+                info.duration = m.duration;
+                info.segments = m.segments;
+                info.encrypted = m.encrypted;
+            }
+            Err(Error::Unsupported(_)) => info.drm = true,
+            Ok(hls::Manifest::Master { .. }) | Err(_) => {}
+        }
+    }
+    Ok(info)
+}
+
+fn drm_info() -> StreamInfo {
+    StreamInfo {
+        protocol: Protocol::Hls,
+        live: false,
+        variants: Vec::new(),
+        audio: Vec::new(),
+        duration: None,
+        segments: None,
+        encrypted: true,
+        drm: true,
+    }
+}
+
 pub struct PlannedTrack {
     pub name: String,
     pub kind: TrackKind,
@@ -273,6 +323,50 @@ pub(crate) mod tests {
 
     fn client() -> Client {
         Client::new(&[], 0, std::time::Duration::from_secs(5)).unwrap()
+    }
+
+    #[tokio::test]
+    async fn inspect_reads_the_media_playlist_behind_an_hls_master() {
+        let master = b"#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=900,RESOLUTION=640x360\nlo.m3u8\n\
+#EXT-X-STREAM-INF:BANDWIDTH=3000,RESOLUTION=1280x720\nhi.m3u8\n";
+        let vod = b"#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-KEY:METHOD=AES-128,URI=\"k\"\n\
+#EXTINF:4,\na.ts\n#EXTINF:3.5,\nb.ts\n#EXT-X-ENDLIST\n";
+        let live = b"#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:2,\na.ts\n";
+        let drm = b"#EXTM3U\n#EXT-X-TARGETDURATION:2\n\
+#EXT-X-KEY:METHOD=SAMPLE-AES,URI=\"skd://k\",KEYFORMAT=\"com.apple.streamingkeydelivery\"\n\
+#EXTINF:2,\na.ts\n#EXT-X-ENDLIST\n";
+        let (root, log) = serve(vec![
+            ("/vod/master.m3u8", 200, "", master.to_vec()),
+            ("/vod/hi.m3u8", 200, "", vod.to_vec()),
+            ("/live/master.m3u8", 200, "", master.to_vec()),
+            ("/live/hi.m3u8", 200, "", live.to_vec()),
+            ("/drm/master.m3u8", 200, "", master.to_vec()),
+            ("/drm/hi.m3u8", 200, "", drm.to_vec()),
+            ("/drm/media.m3u8", 200, "", drm.to_vec()),
+        ]);
+        let c = client();
+        let info = |path: &'static str| {
+            let c = c.clone();
+            let url = root.join(path).unwrap();
+            async move {
+                let p = probe(&c, &url).await.unwrap();
+                inspect(&c, &p).await.unwrap()
+            }
+        };
+
+        let vod = info("vod/master.m3u8").await;
+        assert_eq!(vod.variants.len(), 2);
+        assert!(!vod.live && vod.encrypted && !vod.drm);
+        assert_eq!((vod.duration, vod.segments), (Some(7.5), Some(2)));
+        // Only the best variant's playlist is read.
+        assert!(!log.lock().unwrap().iter().any(|p| p.ends_with("lo.m3u8")));
+
+        let live = info("live/master.m3u8").await;
+        assert!(live.live && !live.encrypted);
+
+        assert!(info("drm/master.m3u8").await.drm);
+        // A media playlist with DRM is described, not an error.
+        assert!(info("drm/media.m3u8").await.drm);
     }
 
     #[tokio::test]

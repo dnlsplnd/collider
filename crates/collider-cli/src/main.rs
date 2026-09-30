@@ -315,6 +315,22 @@ impl Ui {
         match e {
             Event::Status(s) => self.line(format!("» {s}")),
             Event::Detected { protocol } => self.line(format!("» {protocol} stream")),
+            Event::TrackPlanned { track, description } => {
+                self.line(format!("» {track}: {description}"))
+            }
+            Event::Waiting { reason, retry_in } => self.line(format!(
+                "» waiting ({reason}); next check in {}s",
+                retry_in.as_secs()
+            )),
+            Event::Remuxing => self.line("» remuxing with ffmpeg (stream copy)".into()),
+            Event::SegmentStarted { .. } => {}
+            // A segment the manifest only implied still completes the bar; gaps are
+            // reported once the capture ends.
+            Event::SegmentSkipped { track, gap, .. } => {
+                if let Some(t) = tracks.get(&track).filter(|_| !gap) {
+                    t.bar.inc(1);
+                }
+            }
             Event::Gaps { track, missing } => self.line(format!(
                 "! {track}: {missing} segment(s) could not be fetched; the recording has gaps"
             )),
@@ -358,6 +374,7 @@ impl Ui {
                 track,
                 bytes,
                 resumed,
+                ..
             } => {
                 if let Some(t) = tracks.get_mut(&track) {
                     t.segments += 1;

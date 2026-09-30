@@ -58,13 +58,20 @@ impl Default for Options {
     }
 }
 
+/// Progress reports. Segment events carry `index`, the segment's position in the track's
+/// discovery order (the same order `Discovered::total` counts).
 #[derive(Debug, Clone)]
 pub enum Event {
     /// The manifest was fetched and recognised.
     Detected {
         protocol: Protocol,
     },
-    /// A track was selected. `live` is true when the playlist has no end yet.
+    /// A track was chosen; `description` names the variant or rendition.
+    TrackPlanned {
+        track: String,
+        description: String,
+    },
+    /// A track's playlist was read. `live` is true when the playlist has no end yet.
     TrackStarted {
         track: String,
         live: bool,
@@ -74,17 +81,37 @@ pub enum Event {
         track: String,
         total: usize,
     },
+    /// A segment download started.
+    SegmentStarted {
+        track: String,
+        index: usize,
+    },
     /// A segment finished. `resumed` means it was already on disk from an earlier run.
     SegmentDone {
         track: String,
+        index: usize,
         bytes: u64,
         resumed: bool,
+    },
+    /// A segment will not be in the output. `gap` means a live segment that could not be
+    /// fetched; otherwise the manifest only implied it and the origin does not have it.
+    SegmentSkipped {
+        track: String,
+        index: usize,
+        gap: bool,
     },
     /// A live capture ended with gaps (segments that could not be fetched).
     Gaps {
         track: String,
         missing: usize,
     },
+    /// Watch mode: the stream is not available yet; the next check is in `retry_in`.
+    Waiting {
+        reason: String,
+        retry_in: Duration,
+    },
+    /// Every track is captured and ffmpeg is joining them into the output.
+    Remuxing,
     Status(String),
 }
 
@@ -121,9 +148,10 @@ impl Downloader {
         }
     }
 
+    /// What `url` offers. For an HLS master this also reads one media playlist.
     pub async fn info(&self, url: &str) -> Result<StreamInfo> {
         let probe = source::probe(&self.client, &Url::parse(url)?).await?;
-        source::describe(&probe)
+        source::inspect(&self.client, &probe).await
     }
 
     /// Download `url` (HLS playlist or DASH MPD) to `output`. Returns the files written.
@@ -142,10 +170,10 @@ impl Downloader {
                 Ok(tracks) => break tracks,
                 Err(e) if self.opts.wait.is_some() && waitable(&e) => {
                     let interval = self.opts.wait.unwrap_or(Duration::from_secs(30));
-                    (self.report)(Event::Status(format!(
-                        "waiting ({e}); next check in {}s",
-                        interval.as_secs()
-                    )));
+                    (self.report)(Event::Waiting {
+                        reason: e.to_string(),
+                        retry_in: interval,
+                    });
                     tokio::select! {
                         _ = tokio::time::sleep(interval) => {}
                         _ = self.cancel.cancelled() => return Err(Error::Cancelled),
@@ -191,7 +219,10 @@ impl Downloader {
             }
         }
         for t in &tracks {
-            (self.report)(Event::Status(format!("{}: {}", t.name, t.description)));
+            (self.report)(Event::TrackPlanned {
+                track: t.name.clone(),
+                description: t.description.clone(),
+            });
         }
         Ok(tracks)
     }
@@ -288,12 +319,14 @@ impl Downloader {
                         fetch_init(&self.client, &init, key, &dir).await?;
                     }
                 }
+                let base = order.len();
                 order.extend(fresh.iter().cloned());
                 (self.report)(Event::Discovered {
                     track: name.clone(),
                     total: order.len(),
                 });
-                self.fetch_batch(&name, &fresh, &keys, &dir, live).await?;
+                self.fetch_batch(&name, &fresh, base, &keys, &dir, live)
+                    .await?;
             }
 
             if self.cancel.is_cancelled() {
@@ -362,36 +395,71 @@ impl Downloader {
         Ok(())
     }
 
+    /// Fetch `segs`, whose first element is segment `base` of the track.
     async fn fetch_batch(
         &self,
         track: &str,
         segs: &[Segment],
+        base: usize,
         keys: &HashMap<Url, [u8; 16]>,
         dir: &Path,
         live: bool,
     ) -> Result<()> {
-        let client = &self.client;
+        // The futures are built by a plain iterator and a named `async fn`: a closure
+        // returning an async block inside `Stream::map` makes the whole download future
+        // impossible to prove `Send` (rustc #102211), and the GUI spawns it on a runtime.
+        let pending: Vec<_> = segs
+            .iter()
+            .enumerate()
+            .map(|(i, seg)| self.fetch_one(track, seg, base + i, keys, dir, live))
+            .collect();
         // On cancel no new downloads start, but the ones in flight finish: a hole before
         // already-completed later segments would otherwise become a gap in a live capture.
-        let stream = futures::stream::iter(segs.iter())
+        let stream = futures::stream::iter(pending)
             .take_until(self.cancel.cancelled())
-            .map(|seg| async move {
-                let key = seg.key.as_ref().map(|k| (keys[&k.url], k.iv));
-                fetch_segment(client, seg, key, dir, live).await
-            })
             .buffer_unordered(self.opts.concurrency);
         futures::pin_mut!(stream);
 
-        while let Some(done) = stream.try_next().await? {
-            if let Some((bytes, resumed)) = done {
-                (self.report)(Event::SegmentDone {
-                    track: track.to_string(),
+        while let Some((index, fetched)) = stream.try_next().await? {
+            let track = track.to_string();
+            (self.report)(match fetched {
+                Fetched::Done { bytes, resumed } => Event::SegmentDone {
+                    track,
+                    index,
                     bytes,
                     resumed,
-                });
-            }
+                },
+                Fetched::Gap => Event::SegmentSkipped {
+                    track,
+                    index,
+                    gap: true,
+                },
+                Fetched::Absent => Event::SegmentSkipped {
+                    track,
+                    index,
+                    gap: false,
+                },
+            });
         }
         Ok(())
+    }
+
+    async fn fetch_one(
+        &self,
+        track: &str,
+        seg: &Segment,
+        index: usize,
+        keys: &HashMap<Url, [u8; 16]>,
+        dir: &Path,
+        live: bool,
+    ) -> Result<(usize, Fetched)> {
+        (self.report)(Event::SegmentStarted {
+            track: track.to_string(),
+            index,
+        });
+        let key = seg.key.as_ref().map(|k| (keys[&k.url], k.iv));
+        let fetched = fetch_segment(&self.client, seg, key, dir, live).await?;
+        Ok((index, fetched))
     }
 
     async fn finish(&self, outputs: &[TrackOutput], output: &Path) -> Result<Vec<PathBuf>> {
@@ -401,7 +469,7 @@ impl Downloader {
             inputs.push(self.join_pieces(o, ffmpeg).await?);
         }
         if ffmpeg {
-            (self.report)(Event::Status("remuxing with ffmpeg (stream copy)".into()));
+            (self.report)(Event::Remuxing);
             if let Err(e) = mux::remux(&inputs, output).await {
                 // Do not leave a broken file behind; the raw capture stays in the work dir.
                 fs::remove_file(output).await.ok();
@@ -532,18 +600,30 @@ async fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
     Ok(())
 }
 
-/// Returns `Some((bytes, resumed))`, or `None` when a live segment was never published
-/// or an optional segment does not exist.
+/// What became of one segment.
+#[derive(Debug, PartialEq, Eq)]
+enum Fetched {
+    /// On disk; `resumed` means it already was before this run.
+    Done { bytes: u64, resumed: bool },
+    /// A live segment that was never published or could not be fetched.
+    Gap,
+    /// An optional segment that the origin does not have.
+    Absent,
+}
+
 async fn fetch_segment(
     client: &Client,
     seg: &Segment,
     key: Option<([u8; 16], [u8; 16])>,
     dir: &Path,
     live: bool,
-) -> Result<Option<(u64, bool)>> {
+) -> Result<Fetched> {
     let path = segment_path(dir, seg.seq);
     if let Ok(meta) = fs::metadata(&path).await {
-        return Ok(Some((meta.len(), true)));
+        return Ok(Fetched::Done {
+            bytes: meta.len(),
+            resumed: true,
+        });
     }
     // Live segments can be announced slightly before they are available: retry a 404 briefly.
     let mut attempts = 0;
@@ -559,19 +639,19 @@ async fn fetch_segment(
                 url,
             }) if seg.optional => {
                 tracing::debug!(%url, "optional trailing segment does not exist");
-                return Ok(None);
+                return Ok(Fetched::Absent);
             }
             Err(Error::Status {
                 status: 404 | 410,
                 url,
             }) if live => {
                 tracing::warn!(%url, "live segment is gone, skipping");
-                return Ok(None);
+                return Ok(Fetched::Gap);
             }
             // The client already retried; one lost live segment is a gap, not the end.
             Err(e @ (Error::Http(_) | Error::Status { .. })) if live => {
                 tracing::warn!(url = %seg.url, error = %e, "live segment failed, skipping");
-                return Ok(None);
+                return Ok(Fetched::Gap);
             }
             Err(e) => return Err(e),
         }
@@ -581,7 +661,10 @@ async fn fetch_segment(
         None => data.to_vec(),
     };
     write_atomic(&path, &data).await?;
-    Ok(Some((data.len() as u64, false)))
+    Ok(Fetched::Done {
+        bytes: data.len() as u64,
+        resumed: false,
+    })
 }
 
 async fn fetch_init(
@@ -707,6 +790,13 @@ async fn move_file(from: &Path, to: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The download future must stay `Send`: the GUI runs it on a multi-threaded runtime.
+#[allow(dead_code)]
+fn assert_download_is_send(d: &Downloader) {
+    fn send<T: Send>(_: T) {}
+    send(d.download("", Path::new("")));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -793,14 +883,17 @@ mod tests {
         assert!(fetch_segment(&client, &b, None, dir, false).await.is_err());
         // ... but on an optional one it just means the period ended earlier.
         b.optional = true;
-        assert!(fetch_segment(&client, &a, None, dir, false)
-            .await
-            .unwrap()
-            .is_some());
-        assert!(fetch_segment(&client, &b, None, dir, false)
-            .await
-            .unwrap()
-            .is_none());
+        assert_eq!(
+            fetch_segment(&client, &a, None, dir, false).await.unwrap(),
+            Fetched::Done {
+                bytes: 1,
+                resumed: false
+            }
+        );
+        assert_eq!(
+            fetch_segment(&client, &b, None, dir, false).await.unwrap(),
+            Fetched::Absent
+        );
         let (pieces, missing) = concat_track("main", &[a, b], dir, false).await.unwrap();
         assert_eq!(missing, 0);
         assert_eq!(fs::read(&pieces[0]).await.unwrap(), b"A");
@@ -923,11 +1016,33 @@ mod tests {
             .unwrap();
         assert_eq!(files, std::slice::from_ref(&output));
         assert_eq!(fs::read(&output).await.unwrap(), b"AC");
+        let events = events.lock().unwrap();
         assert!(events
-            .lock()
-            .unwrap()
             .iter()
             .any(|e| matches!(e, Event::Gaps { missing: 1, .. })));
+        // Segment events are indexed by discovery order: a.ts, b.ts (the gap), c.ts.
+        let mut done: Vec<usize> = events
+            .iter()
+            .filter_map(|e| match e {
+                Event::SegmentDone { index, .. } => Some(*index),
+                _ => None,
+            })
+            .collect();
+        done.sort();
+        assert_eq!(done, [0, 2]);
+        assert!(events.iter().any(|e| matches!(
+            e,
+            Event::SegmentSkipped {
+                index: 1,
+                gap: true,
+                ..
+            }
+        )));
+        let started = events
+            .iter()
+            .filter(|e| matches!(e, Event::SegmentStarted { .. }))
+            .count();
+        assert_eq!(started, 3);
     }
 
     #[tokio::test]
