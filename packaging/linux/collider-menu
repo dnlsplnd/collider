@@ -1,0 +1,117 @@
+#!/bin/sh
+# collider-menu: the launcher behind the "Collider Terminal" start-menu entry.
+#
+# It shows a short cheat sheet, offers to download a pasted stream URL into your
+# Downloads folder (never overwriting an existing file), and then leaves you in
+# your normal shell so you can keep using collider.
+#
+# Environment:
+#   COLLIDER_DOWNLOAD_DIR  where the menu download is saved (default: your XDG Downloads folder)
+
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" 2>/dev/null && pwd -P)
+if [ -n "$here" ] && [ -x "$here/../../bin/collider" ]; then
+    PATH="$(CDPATH='' cd -- "$here/../../bin" && pwd -P):$PATH"
+    export PATH
+fi
+
+pause_and_exit() {
+    printf 'Press Enter to close. '
+    read -r _
+    exit "${1:-1}"
+}
+
+if ! command -v collider >/dev/null 2>&1; then
+    echo "collider was not found. Reinstall it with scripts/install.sh." >&2
+    pause_and_exit 1
+fi
+
+if [ -t 1 ] && [ "${TERM:-dumb}" != dumb ]; then
+    bold=$(printf '\033[1m')
+    dim=$(printf '\033[2m')
+    reset=$(printf '\033[0m')
+    case "${COLORTERM:-}" in
+        truecolor | 24bit) accent=$(printf '\033[1;38;2;127;185;227m') ;;
+        *) accent=$bold ;;
+    esac
+else
+    bold='' dim='' reset='' accent=''
+fi
+
+download_dir() {
+    if [ -n "${COLLIDER_DOWNLOAD_DIR:-}" ]; then
+        printf '%s\n' "$COLLIDER_DOWNLOAD_DIR"
+        return
+    fi
+    d=$(xdg-user-dir DOWNLOAD 2>/dev/null)
+    case "$d" in
+        '' | "$HOME") d="$HOME/Downloads" ;;
+    esac
+    printf '%s\n' "$d"
+}
+
+printf '\n%s%s%s  %sHLS and MPEG-DASH stream downloader and live recorder%s\n\n' \
+    "$accent" "$(collider --version)" "$reset" "$dim" "$reset"
+cat <<EOF
+  collider info <URL>                       what a stream offers (add --json for scripts)
+  collider get <URL> -o show.mp4            download the best quality
+  collider get <URL> -q 720 -o show.mkv     limit to 720p, write a Matroska file
+  collider get <URL> --wait 20 -o live.mp4  wait for a broadcast to start, then record it
+  collider --help                           every option
+
+  Live streams: press Ctrl-C once to stop and save what was recorded.
+
+EOF
+
+printf '%sStream URL to download now%s (Enter opens a shell): ' "$bold" "$reset"
+IFS= read -r url || url=''
+url=$(printf '%s' "$url" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+
+if [ -n "$url" ]; then
+    case "$url" in
+        http://* | https://*)
+            dir=$(download_dir)
+            if ! mkdir -p "$dir" 2>/dev/null; then
+                echo "Cannot create $dir, using your home folder instead."
+                dir=$HOME
+            fi
+            stamp=$(date +%Y%m%d-%H%M%S)
+            printf 'File name [stream-%s.mp4]: ' "$stamp"
+            IFS= read -r name || name=''
+            [ -n "$name" ] || name="stream-$stamp.mp4"
+            name=$(basename -- "$name")
+            case "$name" in
+                -*) name="_$name" ;;
+            esac
+            case "$name" in
+                *.mp4 | *.mkv | *.mov | *.m4v | *.m4a | *.webm | *.ts) ;;
+                *) name="$name.mp4" ;;
+            esac
+            out="$dir/$name"
+            base=${out%.*}
+            ext=${out##*.}
+            n=1
+            while [ -e "$out" ]; do
+                out="$base-$n.$ext"
+                n=$((n + 1))
+            done
+            printf '\nSaving to %s\n\n' "$out"
+            # Let collider handle the first Ctrl-C (graceful stop) without ending this script.
+            trap : INT
+            collider get "$url" -o "$out"
+            status=$?
+            trap - INT
+            printf '\n'
+            if [ "$status" -eq 0 ]; then
+                printf '%sDone.%s Files are in %s\n' "$bold" "$reset" "$dir"
+            else
+                printf 'collider exited with status %s.\n' "$status"
+            fi
+            ;;
+        *)
+            printf 'That does not look like an http(s) URL, opening a shell instead.\n'
+            ;;
+    esac
+fi
+
+printf '\n%sType exit or press Ctrl-D to close this window.%s\n' "$dim" "$reset"
+exec "${SHELL:-/bin/sh}"

@@ -22,8 +22,15 @@ command-line front end (`collider`).
 ## Install
 
 ```sh
-cargo install --path crates/collider-cli
+scripts/install.sh           # build, then install to /usr/local (asks for your password)
+scripts/install.sh --user    # or install to ~/.local, no root needed
 ```
+
+This installs the `collider` command and a **Collider** start-menu entry (under Internet).
+The entry opens a terminal with a short cheat sheet and offers to download a pasted URL
+into your Downloads folder. `scripts/install.sh --uninstall` removes everything again (add
+`--user` if you installed with it). Elsewhere, or without the menu entry:
+`cargo install --path crates/collider-cli`.
 
 ffmpeg is optional but recommended. Without it, collider saves the raw `.ts`/`.mp4` stream files.
 

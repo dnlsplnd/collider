@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>collider</title>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0B4876"/>
+      <stop offset="1" stop-color="#003153"/>
+    </linearGradient>
+    <linearGradient id="beamL" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#CFE6F7" stop-opacity="0"/>
+      <stop offset="1" stop-color="#E8F3FB"/>
+    </linearGradient>
+    <linearGradient id="beamR" x1="1" y1="0" x2="0" y2="0">
+      <stop offset="0" stop-color="#8FCBF2" stop-opacity="0"/>
+      <stop offset="1" stop-color="#B9DEF7"/>
+    </linearGradient>
+    <radialGradient id="burst" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#FFF6DE"/>
+      <stop offset="0.3" stop-color="#F7C65C"/>
+      <stop offset="0.65" stop-color="#E39A2C" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#E39A2C" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="12" y="12" width="232" height="232" rx="54" fill="url(#tile)"/>
+  <rect x="12.75" y="12.75" width="230.5" height="230.5" rx="53.25" fill="none" stroke="#FFFFFF" stroke-opacity="0.10" stroke-width="1.5"/>
+  <circle cx="128" cy="128" r="84" fill="none" stroke="#6FAEDC" stroke-opacity="0.45" stroke-width="8"/>
+  <path d="M34 146 Q 78 130 114 128" fill="none" stroke="url(#beamL)" stroke-width="11" stroke-linecap="round"/>
+  <path d="M222 110 Q 178 126 142 128" fill="none" stroke="url(#beamR)" stroke-width="11" stroke-linecap="round"/>
+  <g fill="none" stroke-linecap="round">
+    <path d="M128 128 Q 146 104 170 92" stroke="#F7C65C" stroke-width="6"/>
+    <path d="M128 128 Q 108 150 84 158" stroke="#F7C65C" stroke-width="6"/>
+    <path d="M128 128 Q 122 100 104 82" stroke="#CFE6F7" stroke-width="4.5"/>
+    <path d="M128 128 Q 136 156 156 172" stroke="#CFE6F7" stroke-width="4.5"/>
+  </g>
+  <circle cx="128" cy="128" r="44" fill="url(#burst)"/>
+  <circle cx="128" cy="128" r="13" fill="#FFF9EA"/>
+</svg>
